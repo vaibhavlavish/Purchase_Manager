@@ -1,0 +1,1082 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Suhag Purchase Manager</title>
+    <meta name="theme-color" content="#1a1a1a">
+
+    <link rel="manifest" href="manifest.json">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="SPM">
+    <link rel="apple-touch-icon" href="icon-192.png">
+    <link rel="icon" href="icon-192.png">
+
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+        import { getDatabase, ref, set, update, remove, onValue, get, runTransaction } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
+        import { getAuth, signInWithEmailAndPassword, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+
+        const firebaseConfig = {
+          apiKey: "AIzaSyDaRjbdCnfx5-C4OXQaByZMxK2r0Cu19bI",
+          authDomain: "suhag-f53e4.firebaseapp.com",
+          databaseURL: "https://suhag-f53e4-default-rtdb.asia-southeast1.firebasedatabase.app",
+          projectId: "suhag-f53e4",
+          storageBucket: "suhag-f53e4.firebasestorage.app",
+          messagingSenderId: "231258063675",
+          appId: "1:231258063675:web:1c79c2a0d4d5796a6d2d1e",
+          measurementId: "G-MJ1BBWZFVW"
+        };
+        const app = initializeApp(firebaseConfig);
+        const db = getDatabase(app);
+        const auth = getAuth(app);
+        window.firebaseDB = db;
+        window.dbRef = ref;
+        window.dbSet = set;
+        window.dbUpdate = update;
+        window.dbRemove = remove;
+        window.dbOnValue = onValue;
+        window.dbGet = get;
+        window.dbRunTransaction = runTransaction;
+        window.firebaseAuth = auth;
+        window.authSignOut = signOut;
+
+        // ── ORIGIN LOCK / WRITE PROTECTION ──────────────────────────────
+        // Same mechanism as POS.html, same reasoning: a locally-downloaded
+        // copy of this file must never be able to write to production data,
+        // even by accident. location.origin only covers scheme+host (not
+        // path), so this matches ANY repo hosted under this GitHub Pages
+        // account, same as POS.html's own check.
+        const ALLOWED_ORIGIN = 'https://vaibhavlavish.github.io';
+        const _originOk = (location.origin === ALLOWED_ORIGIN);
+        window._writeAllowed = _originOk;
+
+        function _guardWrite(fn, label) {
+            return function(...args) {
+                if (!window._writeAllowed) {
+                    console.warn('[WRITE BLOCKED]', label, '— read-only mode, not running from', ALLOWED_ORIGIN);
+                    return Promise.reject(new Error('Writes are disabled — this copy is not running from ' + ALLOWED_ORIGIN));
+                }
+                return fn.apply(this, args);
+            };
+        }
+        window.dbSet = _guardWrite(window.dbSet, 'dbSet');
+        window.dbUpdate = _guardWrite(window.dbUpdate, 'dbUpdate');
+        window.dbRemove = _guardWrite(window.dbRemove, 'dbRemove');
+        window.dbRunTransaction = _guardWrite(window.dbRunTransaction, 'dbRunTransaction');
+
+        if (!_originOk) {
+            console.warn('[ORIGIN] Write blocked — not running from', ALLOWED_ORIGIN, '(got:', location.origin + ')');
+            setTimeout(() => {
+                alert('\u26a0\ufe0f Read-only mode\n\nThis copy is running from:\n' + location.origin +
+                      '\n\nAll writes to the cloud are DISABLED to protect your data.\n\nOpen the official app instead.');
+            }, 400);
+        }
+
+        // ── AUTH ─────────────────────────────────────────────────────
+        let _resolveAuthReady;
+        const _authReadyPromise = new Promise(resolve => { _resolveAuthReady = resolve; });
+        window.getAuthReadyPromise = () => _authReadyPromise;
+
+        document.getElementById('pm-login-btn').addEventListener('click', () => {
+            const email = document.getElementById('pm-login-email').value.trim();
+            const pass = document.getElementById('pm-login-pass').value;
+            const errEl = document.getElementById('pm-login-error');
+            errEl.style.display = 'none';
+            signInWithEmailAndPassword(auth, email, pass).catch(() => {
+                errEl.textContent = 'Sign-in failed — check email/password.';
+                errEl.style.display = 'block';
+            });
+        });
+        document.getElementById('pm-login-pass').addEventListener('keydown', e => {
+            if (e.key === 'Enter') document.getElementById('pm-login-btn').click();
+        });
+
+        onAuthStateChanged(auth, user => {
+            document.getElementById('pm-login-card').style.display = user ? 'none' : 'block';
+            document.getElementById('pm-app-view').style.display = user ? 'flex' : 'none';
+            if (user && _resolveAuthReady) { _resolveAuthReady(user); _resolveAuthReady = null; }
+        });
+    </script>
+
+    <style>
+        :root {
+            --bg:       #FFFFFF;
+            --surface:  #FFFFFF;
+            --charcoal: #1a1a1a;
+            --gold:     #4CAF50;
+            --green:    #4CAF50;
+            --red:      #F44336;
+            --text:     #1C1C1E;
+            --text2:    #6B8F73;
+            --border:   #A5D6A7;
+            --radius:   14px;
+            --radius-sm:9px;
+        }
+        * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+        html, body { height: 100%; margin: 0; padding: 0; }
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            background-color: #F7F7F5;
+            display: flex; flex-direction: column;
+            touch-action: manipulation;
+        }
+        input, select, button { font-family: inherit; }
+        .note { font-size: 12px; color: var(--text2); margin: 0; }
+        #pm-brand {
+            padding: 22px 20px 16px; text-align: center; cursor: pointer;
+            user-select: none; background: var(--charcoal); color: white;
+        }
+        #pm-brand h1 { margin: 0; font-size: 20px; letter-spacing: .04em; font-weight: 800; }
+        #pm-brand .sub { font-size: 11px; color: #9fb8a3; margin-top: 2px; }
+        #pm-track-pill {
+            display: none; margin: 6px auto 0; width: fit-content;
+            background: #ff80ab; color: white; font-size: 11px; font-weight: 700;
+            padding: 3px 10px; border-radius: 20px;
+        }
+        #pm-content { flex: 1; overflow-y: auto; padding: 14px; max-width: 600px; margin: 0 auto; width: 100%; box-sizing: border-box; }
+
+        #hedge-log-modal, #manual-owed-modal, #pm-alert-modal {
+            display: none; position: fixed; inset: 0;
+            background: rgba(0,0,0,0.55); z-index: 1150;
+            align-items: flex-end; justify-content: center;
+        }
+        #hedge-log-modal.show, #manual-owed-modal.show, #pm-alert-modal.show { display: flex; }
+        #hedge-log-panel, #manual-owed-panel, #pm-alert-panel {
+            background: white; border-radius: 20px 20px 0 0;
+            width: 100%; max-width: 480px;
+            padding: 22px 20px 30px;
+            box-shadow: 0 -8px 32px rgba(0,0,0,0.15);
+            max-height: 88vh; overflow-y: auto;
+        }
+        button { cursor: pointer; }
+    </style>
+</head>
+<body>
+
+<div id="pm-login-card" style="max-width:360px; margin:60px auto; padding:26px 22px; background:#fff; border:1px solid var(--border); border-radius:var(--radius);">
+    <h2 style="margin:0 0 4px; font-size:18px; color:var(--charcoal);">Sign in</h2>
+    <p style="margin:0 0 18px; font-size:12.5px; color:var(--text2);">This is the shop's private purchase management tool.</p>
+    <div style="margin-bottom:12px;">
+        <label style="display:block; font-size:12px; font-weight:700; color:var(--charcoal); margin-bottom:4px;">Email</label>
+        <input type="email" id="pm-login-email" autocomplete="username" style="width:100%; padding:10px 12px; border:1.5px solid var(--border); border-radius:var(--radius-sm); font-size:14px; box-sizing:border-box;">
+    </div>
+    <div style="margin-bottom:16px;">
+        <label style="display:block; font-size:12px; font-weight:700; color:var(--charcoal); margin-bottom:4px;">Password</label>
+        <input type="password" id="pm-login-pass" autocomplete="current-password" style="width:100%; padding:10px 12px; border:1.5px solid var(--border); border-radius:var(--radius-sm); font-size:14px; box-sizing:border-box;">
+    </div>
+    <button id="pm-login-btn" style="width:100%; padding:11px 0; background:var(--gold); color:#fff; border:none; border-radius:var(--radius-sm); font-size:14px; font-weight:700;">Sign In</button>
+    <p id="pm-login-error" style="display:none; margin:12px 0 0; font-size:12.5px; color:var(--red);"></p>
+</div>
+
+<div id="pm-app-view" style="display:none; flex-direction:column; height:100%; width:100%;">
+    <div id="pm-brand" onclick="pmHandleBrandTap()">
+        <h1>SUHAG JEWELLERS</h1>
+        <div class="sub">Purchase Manager</div>
+        <div id="pm-track-pill">TRACK B</div>
+    </div>
+
+    <div id="pm-content">
+        <p class="note" style="margin:0 0 12px;">Grams shown are pure (24K/999) equivalent.</p>
+
+        <div style="display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:12px; background:var(--surface); border-radius:var(--radius); padding:10px 14px; box-shadow:0 1px 6px rgba(0,0,0,.06);">
+            <label for="hedge-sales-start-date" style="font-size:11px; color:var(--text2); font-weight:700;">Count sales since</label>
+            <input type="date" id="hedge-sales-start-date" onchange="setSalesHedgeStartDate(this.value)" style="margin:0; width:auto;">
+        </div>
+
+        <div id="hedge-summary-cards" style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:12px;"></div>
+
+        <div id="hedge-pnl-card" style="display:none; background:var(--surface); border-radius:var(--radius); padding:14px; margin-bottom:16px; box-shadow:0 1px 6px rgba(0,0,0,.06);"></div>
+
+        <div id="hedge-plans-section" style="display:none; margin-bottom:20px;">
+            <div style="font-size:10px; font-weight:700; letter-spacing:.08em; color:var(--text2); text-transform:uppercase; margin-bottom:8px;">Installment Plans</div>
+            <div id="hedge-plans-list"></div>
+        </div>
+
+        <div id="hedge-sales-track" style="margin-bottom:20px;"></div>
+    </div>
+</div>
+
+<div id="hedge-log-modal">
+    <div id="hedge-log-panel">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
+            <h3 id="hedge-log-title" style="margin:0; font-size:18px; color:#1a1a1a;">Log Hedge Purchase</h3>
+            <button onclick="closeHedgeLogModal()" style="background:none; border:none; font-size:22px; color:#aaa; padding:0; width:auto; box-shadow:none; margin:0;">✕</button>
+        </div>
+        <input type="hidden" id="hedge-log-plan-id" value="">
+        <input type="hidden" id="hedge-log-entry-id" value="">
+        <p class="note" id="hedge-log-plan-note" style="display:none; margin-bottom:14px;"></p>
+
+        <label style="font-size:12px; font-weight:700; color:#888; margin:0 0 4px 0;">METAL</label>
+        <select id="hedge-log-metal" style="padding:10px 12px; border:1.5px solid #e0e0e0; border-radius:10px; width:100%; font-size:14px; margin-bottom:14px; box-sizing:border-box;">
+            <option value="Gold">Gold</option>
+            <option value="Silver">Silver</option>
+        </select>
+
+        <label style="font-size:12px; font-weight:700; color:#888; margin:0 0 4px 0;">GRAMS PURCHASED</label>
+        <input type="number" id="hedge-log-grams" placeholder="e.g. 12.5" step="0.01" min="0"
+               style="padding:10px 12px; border:1.5px solid #e0e0e0; border-radius:10px; width:100%; font-size:14px; margin-bottom:14px; box-sizing:border-box;">
+
+        <label style="font-size:12px; font-weight:700; color:#888; margin:0 0 4px 0;">RATE PAID (₹/gram)</label>
+        <input type="number" id="hedge-log-rate" placeholder="e.g. 6250 — leave blank for a barter/melt exchange" step="0.01" min="0"
+               style="padding:10px 12px; border:1.5px solid #e0e0e0; border-radius:10px; width:100%; font-size:14px; margin-bottom:14px; box-sizing:border-box;">
+
+        <label style="font-size:12px; font-weight:700; color:#888; margin:0 0 4px 0;">NOTE (OPTIONAL)</label>
+        <input type="text" id="hedge-log-note" placeholder="e.g. Melt exchange, Cash purchase…"
+               style="padding:10px 12px; border:1.5px solid #e0e0e0; border-radius:10px; width:100%; font-size:14px; margin-bottom:16px; box-sizing:border-box;">
+
+        <button onclick="saveHedgeLogEntry()" id="hedge-log-save-btn"
+            style="width:100%; padding:14px; background:var(--gold); color:white; border:none; border-radius:12px; font-size:16px; font-weight:800;">
+            ✓ Save Purchase
+        </button>
+    </div>
+</div>
+
+<div id="manual-owed-modal">
+    <div id="manual-owed-panel">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
+            <h3 id="manual-owed-title" style="margin:0; font-size:18px; color:#1a1a1a;">Add Owed Entry</h3>
+            <button onclick="closeManualOwedModal()" style="background:none; border:none; font-size:22px; color:#aaa; padding:0; width:auto; box-shadow:none; margin:0;">✕</button>
+        </div>
+        <input type="hidden" id="manual-owed-entry-id" value="">
+        <p class="note" style="margin-bottom:14px;">A durable record of grams owed that doesn't depend on invoice history — useful as a backstop if that data is ever cleared. Dated to today, and only counts if that's on or after "Count sales since" above.</p>
+
+        <label style="font-size:12px; font-weight:700; color:#888; margin:0 0 4px 0;">METAL</label>
+        <select id="manual-owed-metal" style="padding:10px 12px; border:1.5px solid #e0e0e0; border-radius:10px; width:100%; font-size:14px; margin-bottom:14px; box-sizing:border-box;">
+            <option value="Gold">Gold</option>
+            <option value="Silver">Silver</option>
+        </select>
+
+        <label style="font-size:12px; font-weight:700; color:#888; margin:0 0 4px 0;">GRAMS OWED</label>
+        <input type="number" id="manual-owed-grams" placeholder="e.g. 12.5" step="0.01" min="0"
+               style="padding:10px 12px; border:1.5px solid #e0e0e0; border-radius:10px; width:100%; font-size:14px; margin-bottom:14px; box-sizing:border-box;">
+
+        <label style="font-size:12px; font-weight:700; color:#888; margin:0 0 4px 0;">NOTE (OPTIONAL)</label>
+        <input type="text" id="manual-owed-note" placeholder="e.g. Backfilled after data reset"
+               style="padding:10px 12px; border:1.5px solid #e0e0e0; border-radius:10px; width:100%; font-size:14px; margin-bottom:16px; box-sizing:border-box;">
+
+        <button onclick="saveManualOwedEntry()" id="manual-owed-save-btn"
+            style="width:100%; padding:14px; background:var(--gold); color:white; border:none; border-radius:12px; font-size:16px; font-weight:800;">
+            ✓ Save
+        </button>
+    </div>
+</div>
+
+<div id="pm-alert-modal">
+    <div id="pm-alert-panel" style="text-align:center;">
+        <h3 id="pm-alert-title" style="margin:0 0 10px; font-size:18px; color:#1a1a1a;">Alert</h3>
+        <p id="pm-alert-message" style="margin:0 0 20px; font-size:14px; color:#333;"></p>
+        <div id="pm-alert-actions" style="display:flex; gap:10px;"></div>
+    </div>
+</div>
+
+<script>
+    // ── Lightweight alert/confirm, same visual language as the modals above ──
+    let _pmConfirmCallback = null;
+    function showCustomAlert(message, title) {
+        document.getElementById('pm-alert-title').textContent = title || 'Alert';
+        document.getElementById('pm-alert-message').innerHTML = message;
+        document.getElementById('pm-alert-actions').innerHTML =
+            '<button onclick="closePmAlert()" style="flex:1; padding:12px; background:var(--gold); color:white; border:none; border-radius:10px; font-weight:700;">OK</button>';
+        document.getElementById('pm-alert-modal').classList.add('show');
+    }
+    function showCustomConfirm(message, title, onConfirm) {
+        document.getElementById('pm-alert-title').textContent = title || 'Confirm';
+        document.getElementById('pm-alert-message').innerHTML = message;
+        _pmConfirmCallback = onConfirm;
+        document.getElementById('pm-alert-actions').innerHTML = `
+            <button onclick="closePmAlert()" style="flex:1; padding:12px; background:#eee; color:#333; border:none; border-radius:10px; font-weight:700;">Cancel</button>
+            <button onclick="_pmExecuteConfirm()" style="flex:1; padding:12px; background:var(--gold); color:white; border:none; border-radius:10px; font-weight:700;">OK</button>
+        `;
+        document.getElementById('pm-alert-modal').classList.add('show');
+    }
+    function _pmExecuteConfirm() {
+        if (typeof _pmConfirmCallback === 'function') _pmConfirmCallback();
+        _pmConfirmCallback = null;
+        closePmAlert();
+    }
+    function closePmAlert() {
+        document.getElementById('pm-alert-modal').classList.remove('show');
+    }
+
+    function invToast(msg, dur) {
+        let el = document.getElementById('inv-toast');
+        if (!el) {
+            el = document.createElement('div');
+            el.id = 'inv-toast';
+            el.style.cssText = 'position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#1a1a1a;color:white;padding:10px 20px;border-radius:30px;font-size:13px;font-weight:600;z-index:99999;opacity:0;transition:opacity .25s;pointer-events:none;white-space:nowrap;';
+            document.body.appendChild(el);
+        }
+        el.textContent = msg;
+        el.style.opacity = '1';
+        clearTimeout(invToast._t);
+        invToast._t = setTimeout(() => { el.style.opacity = '0'; }, dur || 2500);
+    }
+
+    // ── Track toggle — same 5-tap gesture as POS.html, applied to the brand heading ──
+    let currentInvTrack = 'A';
+    let _pmTapCount = 0, _pmTapTimer = null;
+    function pmHandleBrandTap() {
+        if (currentInvTrack === 'B') {
+            currentInvTrack = 'A';
+            document.getElementById('pm-track-pill').style.display = 'none';
+            invToast('🔒 Track A');
+            renderHedgeDashboard();
+            return;
+        }
+        _pmTapCount++;
+        clearTimeout(_pmTapTimer);
+        _pmTapTimer = setTimeout(() => { _pmTapCount = 0; }, 1500);
+        if (_pmTapCount >= 5) {
+            _pmTapCount = 0;
+            clearTimeout(_pmTapTimer);
+            currentInvTrack = 'B';
+            document.getElementById('pm-track-pill').style.display = 'block';
+            invToast('🔓 Track B');
+            renderHedgeDashboard();
+        }
+    }
+
+    // ── Global state, synced from Firebase (read-only except where noted) ──
+    let installmentPlans = [];
+    let invoiceHistory = [];
+    let productData = {};
+    let rates = { gold: {}, silver: {} };
+    let baseCalcDefaults = {};
+    let hedgeLog = [];
+
+    function _objToArraySimple(obj) {
+        if (!obj) return [];
+        return Object.values(obj);
+    }
+
+    function startCoreDataSync() {
+        if (!window.dbOnValue || !window.firebaseDB) { setTimeout(startCoreDataSync, 500); return; }
+
+        window.dbOnValue(window.dbRef(window.firebaseDB, 'jewelryData/config'), snap => {
+            const val = snap.val() || {};
+            rates = val.rates || { gold: {}, silver: {} };
+            baseCalcDefaults = val.baseCalcDefaults || {};
+            renderHedgeDashboard();
+        }, err => console.error('[Config] read error', err));
+
+        window.dbOnValue(window.dbRef(window.firebaseDB, 'jewelryData/products'), snap => {
+            productData = snap.val() || {};
+            renderHedgeDashboard();
+        }, err => console.error('[Products] read error', err));
+
+        window.dbOnValue(window.dbRef(window.firebaseDB, 'jewelryData/invoiceHistory'), snap => {
+            invoiceHistory = _objToArraySimple(snap.val());
+            renderHedgeDashboard();
+        }, err => console.error('[InvoiceHistory] read error', err));
+
+        window.dbOnValue(window.dbRef(window.firebaseDB, 'installments'), snap => {
+            installmentPlans = _objToArraySimple(snap.val());
+            renderHedgeDashboard();
+        }, err => console.error('[Installments] read error', err));
+
+        window.dbOnValue(window.dbRef(window.firebaseDB, 'hedgeLog'), snap => {
+            const val = snap.val() || {};
+            hedgeLog = Object.values(val).sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+            renderHedgeDashboard();
+        }, err => console.error('[HedgeLog] read error', err));
+    }
+
+    function getPureRate(metal) {
+        const metalKey = metal.toLowerCase();
+        let pureRate = 0;
+        if (baseCalcDefaults[metalKey] && baseCalcDefaults[metalKey].baseRate > 0) {
+            pureRate = baseCalcDefaults[metalKey].baseRate;
+        } else if (rates[metalKey]) {
+            if (rates[metalKey]['24K']) pureRate = rates[metalKey]['24K'];
+            else if (rates[metalKey]['999']) pureRate = rates[metalKey]['999'];
+            else if (rates[metalKey]['99.9']) pureRate = rates[metalKey]['99.9'];
+        }
+        return pureRate;
+    }
+
+    function _normMetal(m){
+        if (!m) return '';
+        const s = String(m).trim();
+        return s.charAt(0).toUpperCase() + s.slice(1).toLowerCase();
+    }
+
+    function _purityRatio(metal, stamp){
+        if (!metal || !stamp) return 1;
+        const metalKey = String(metal).toLowerCase();
+        const pureRate = getPureRate(metalKey);
+        const stampRate = (rates[metalKey] && rates[metalKey][stamp]) || 0;
+        if (!pureRate || !stampRate) return 1;
+        return stampRate / pureRate;
+    }
+
+    function getInstallmentItemMetalWeight(item){
+        if (item.type === 'repair') return null;
+        if (item.type === 'loose') {
+            const rawWeight = item.weight || 0;
+            return { metal: _normMetal(item.metal), weight: rawWeight * _purityRatio(item.metal, item.stamp) };
+        }
+        if (item.metal && typeof item.weight === 'number') {
+            const stamp = item.stamp || (productData[item.barcode] && productData[item.barcode].stamp);
+            return { metal: _normMetal(item.metal), weight: item.weight * _purityRatio(item.metal, stamp) };
+        }
+        const d = productData[item.barcode];
+        if (!d) return null;
+        return { metal: _normMetal(d.metal), weight: (d.netWeight || 0) * _purityRatio(d.metal, d.stamp) };
+    }
+
+    function getPlanHedgeGrams(plan){
+        const totals = {};
+        let unresolved = 0;
+        (plan.items || []).forEach(item => {
+            if (item.type === 'repair') return;
+            const mw = getInstallmentItemMetalWeight(item);
+            if (!mw || !mw.metal) { unresolved++; return; }
+            totals[mw.metal] = (totals[mw.metal] || 0) + mw.weight;
+        });
+        return { totals, unresolved };
+    }
+
+    function getHedgedGrams(planId){
+        const totals = {};
+        hedgeLog.forEach(e => {
+            if (planId !== undefined && (e.planId || null) !== planId) return;
+            totals[e.metal] = (totals[e.metal] || 0) + (e.grams || 0);
+        });
+        return totals;
+    }
+
+    const SALES_HEDGE_BUCKET = { A: '__sales_a__', B: '__sales_b__' };
+    const SALES_HEDGE_START_DATE = new Date('2026-07-21T00:00:00');
+
+    let salesHedgeStartDates = { A: null, B: null };
+    let _salesHedgeDatesSyncStarted = false;
+    function startSalesHedgeDatesSync(){
+        if (_salesHedgeDatesSyncStarted) return;
+        if (!window.dbOnValue || !window.firebaseDB) { setTimeout(startSalesHedgeDatesSync, 500); return; }
+        _salesHedgeDatesSyncStarted = true;
+        window.dbOnValue(window.dbRef(window.firebaseDB, 'hedgeSalesStartDates'), snap => {
+            const val = snap.val() || {};
+            salesHedgeStartDates = { A: val.A || null, B: val.B || null };
+            renderHedgeDashboard();
+        }, err => console.error('[SalesHedgeDates] read error', err));
+    }
+    function getSalesHedgeStartDate(track){
+        const stored = salesHedgeStartDates[track];
+        return stored ? new Date(stored + 'T00:00:00') : SALES_HEDGE_START_DATE;
+    }
+    async function setSalesHedgeStartDate(dateStr){
+        if (!dateStr) return;
+        const track = currentInvTrack;
+        try {
+            await window.dbUpdate(window.dbRef(window.firebaseDB, 'hedgeSalesStartDates'), { [track]: dateStr });
+            salesHedgeStartDates[track] = dateStr;
+            renderHedgeDashboard();
+        } catch (e) {
+            console.error('[SalesHedgeDates] set failed', e);
+            showCustomAlert(window._writeAllowed ? 'Could not save — try again.' : 'Writes are disabled — this copy is running in read-only mode.');
+        }
+    }
+
+    function getInvoiceItemPureGrams(item){
+        let rawMetal = item.metal;
+        if (!rawMetal && item.barcode && productData[item.barcode]) rawMetal = productData[item.barcode].metal;
+        if (!rawMetal && item.desc) {
+            const d = item.desc.toLowerCase();
+            if (d.includes('gold')) rawMetal = 'gold';
+            else if (d.includes('silver') || d.includes('925')) rawMetal = 'silver';
+        }
+        const metal = _normMetal(rawMetal);
+        if (metal !== 'Gold' && metal !== 'Silver') return null;
+        const stamp = item.stamp || (item.barcode && productData[item.barcode] && productData[item.barcode].stamp) || '';
+        const rawWeight = item.nlWt || 0;
+        return { metal, weight: rawWeight * _purityRatio(metal, stamp) };
+    }
+
+    let manualOwedLog = [];
+    let _manualOwedSyncStarted = false;
+    function startManualOwedSync(){
+        if (_manualOwedSyncStarted) return;
+        if (!window.dbOnValue || !window.firebaseDB) { setTimeout(startManualOwedSync, 500); return; }
+        _manualOwedSyncStarted = true;
+        window.dbOnValue(window.dbRef(window.firebaseDB, 'manualOwedLog'), snap => {
+            const val = snap.val() || {};
+            manualOwedLog = Object.values(val).sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+            renderHedgeDashboard();
+        }, err => console.error('[ManualOwedLog] read error', err));
+    }
+
+    function getSalesTrackGrams(track){
+        const totals = { Gold: 0, Silver: 0 };
+        const startDate = getSalesHedgeStartDate(track);
+        invoiceHistory.forEach(inv => {
+            if (inv.draft) return;
+            if (inv.track !== track) return;
+            if (new Date(inv.timestamp) < startDate) return;
+            (inv.items || []).forEach(item => {
+                const mw = getInvoiceItemPureGrams(item);
+                if (mw) totals[mw.metal] += mw.weight;
+            });
+        });
+        manualOwedLog.forEach(e => {
+            if (e.track !== track) return;
+            if (new Date(e.createdAt) < startDate) return;
+            totals[e.metal] = (totals[e.metal] || 0) + (e.grams || 0);
+        });
+        return totals;
+    }
+
+    function getHedgedGramsSinceForTrack(track){
+        const startDate = getSalesHedgeStartDate(track);
+        const bucketId = SALES_HEDGE_BUCKET[track];
+        const totals = {};
+        hedgeLog.forEach(e => {
+            if ((e.planId || null) !== bucketId) return;
+            if (new Date(e.createdAt) < startDate) return;
+            totals[e.metal] = (totals[e.metal] || 0) + (e.grams || 0);
+        });
+        return totals;
+    }
+
+    function computeHedgeSummary(){
+        const owed = { Gold: 0, Silver: 0 };
+        let unresolvedPlans = 0;
+        installmentPlans.filter(p => p.status === 'active').forEach(plan => {
+            const g = getPlanHedgeGrams(plan);
+            owed.Gold += g.totals.Gold || 0;
+            owed.Silver += g.totals.Silver || 0;
+            if (g.unresolved > 0) unresolvedPlans++;
+        });
+        const hedged = { Gold: 0, Silver: 0 };
+        hedgeLog.forEach(e => {
+            if (e.planId === SALES_HEDGE_BUCKET.A || e.planId === SALES_HEDGE_BUCKET.B) return;
+            hedged[e.metal] = (hedged[e.metal] || 0) + (e.grams || 0);
+        });
+        return {
+            Gold: { owed: owed.Gold, hedged: hedged.Gold || 0, toBuy: Math.max(0, owed.Gold - (hedged.Gold || 0)) },
+            Silver: { owed: owed.Silver, hedged: hedged.Silver || 0, toBuy: Math.max(0, owed.Silver - (hedged.Silver || 0)) },
+            unresolvedPlans
+        };
+    }
+
+    function computeSalesTrackSummary(track){
+        const owed = getSalesTrackGrams(track);
+        const hedged = getHedgedGramsSinceForTrack(track);
+        return {
+            Gold: { owed: owed.Gold || 0, hedged: hedged.Gold || 0, toBuy: Math.max(0, (owed.Gold || 0) - (hedged.Gold || 0)) },
+            Silver: { owed: owed.Silver || 0, hedged: hedged.Silver || 0, toBuy: Math.max(0, (owed.Silver || 0) - (hedged.Silver || 0)) }
+        };
+    }
+
+    function computeCombinedAvgRate(metal){
+        let totalGrams = 0, weightedSum = 0;
+        installmentPlans.filter(p => p.status === 'active').forEach(plan => {
+            const g = getPlanHedgeGrams(plan);
+            const owed = g.totals[metal] || 0;
+            if (owed <= 0) return;
+            const rate = _getAppliedPureRate(plan, metal);
+            if (!rate) return;
+            totalGrams += owed;
+            weightedSum += owed * rate;
+        });
+        const salesOwed = getSalesTrackGrams(currentInvTrack)[metal] || 0;
+        if (salesOwed > 0) {
+            const salesRate = getSalesTrackWeightedRate(currentInvTrack, metal);
+            if (salesRate) {
+                totalGrams += salesOwed;
+                weightedSum += salesOwed * salesRate;
+            }
+        }
+        return totalGrams > 0 ? weightedSum / totalGrams : 0;
+    }
+
+    function _getAppliedPureRate(plan, metal){
+        if (!plan.appliedPureRates) return 0;
+        const norm = _normMetal(metal);
+        return plan.appliedPureRates[norm]
+            || plan.appliedPureRates[metal]
+            || plan.appliedPureRates[norm.toLowerCase()]
+            || 0;
+    }
+
+    function getSalesTrackWeightedRate(track, metal){
+        let totalWeight = 0, weightedSum = 0;
+        const startDate = getSalesHedgeStartDate(track);
+        invoiceHistory.forEach(inv => {
+            if (inv.draft || inv.track !== track) return;
+            if (new Date(inv.timestamp) < startDate) return;
+            (inv.items || []).forEach(item => {
+                const mw = getInvoiceItemPureGrams(item);
+                if (!mw || mw.metal !== metal || !mw.weight || !item.pureRate) return;
+                totalWeight += mw.weight;
+                weightedSum += mw.weight * item.pureRate;
+            });
+        });
+        return totalWeight > 0 ? weightedSum / totalWeight : 0;
+    }
+
+    function computeHedgePnl(){
+        let totalPnl = 0;
+        const rows = [];
+        const salesRateCache = {};
+        hedgeLog.forEach(e => {
+            if (!e.planId) return;
+            let bookedRate = 0, label = '';
+            if (e.planId === SALES_HEDGE_BUCKET.A || e.planId === SALES_HEDGE_BUCKET.B) {
+                const track = e.planId === SALES_HEDGE_BUCKET.A ? 'A' : 'B';
+                const cacheKey = track + '|' + e.metal;
+                if (!(cacheKey in salesRateCache)) salesRateCache[cacheKey] = getSalesTrackWeightedRate(track, e.metal);
+                bookedRate = salesRateCache[cacheKey];
+                label = `Track ${track} Sales`;
+            } else {
+                const plan = installmentPlans.find(p => p.id === e.planId);
+                if (!plan) return;
+                bookedRate = _getAppliedPureRate(plan, e.metal);
+                label = plan.customerName;
+            }
+            if (!bookedRate || !e.rate) return;
+            const pnl = (bookedRate - e.rate) * (e.grams || 0);
+            totalPnl += pnl;
+            rows.push({ customerName: label, metal: e.metal, grams: e.grams, rate: e.rate, bookedRate, pnl });
+        });
+        return { totalPnl, rows };
+    }
+
+    // ── Expand/collapse state ──
+    let _hedgeExpandedPlans = new Set();
+    function _toggleHedgePlanEntries(planId){
+        if (_hedgeExpandedPlans.has(planId)) _hedgeExpandedPlans.delete(planId);
+        else _hedgeExpandedPlans.add(planId);
+        renderHedgeDashboard();
+    }
+    let _hedgeSettledExpanded = false;
+    function _toggleHedgeSettled(){
+        _hedgeSettledExpanded = !_hedgeSettledExpanded;
+        renderHedgeDashboard();
+    }
+
+    function _hedgeEntryRow(e){
+        return `
+            <div style="display:flex; justify-content:space-between; align-items:center; background:var(--surface); border-radius:var(--radius); padding:10px 14px; margin-bottom:8px; box-shadow:0 1px 6px rgba(0,0,0,.06);">
+                <div style="font-size:12.5px;">
+                    <b>${e.metal}</b> · ${(e.grams || 0).toFixed(2)}g ${e.rate ? `@ ₹${e.rate.toFixed(2)}/g` : ''}
+                    <div style="font-size:10.5px; color:var(--text2);">${e.date || ''}${e.note ? ' · ' + e.note.replace(/</g, '&lt;') : ''}</div>
+                </div>
+                <div style="display:flex; align-items:center; gap:8px;">
+                    <button onclick="openHedgeLogModal(null, '${e.id}')" title="Edit" style="background:none; border:1.5px solid var(--border); color:var(--text); font-weight:700; padding:5px 10px; border-radius:8px; font-size:11px; width:auto; margin:0;">Edit</button>
+                    <button onclick="deleteHedgeLogEntry('${e.id}')" title="Remove" style="background:none; border:none; color:#C62828; font-size:16px; padding:0; width:auto; box-shadow:none; margin:0;">✕</button>
+                </div>
+            </div>`;
+    }
+
+    // ── Main render ──
+    function renderHedgeDashboard(){
+        const dateFieldEl = document.getElementById('hedge-sales-start-date');
+        if (dateFieldEl && document.activeElement !== dateFieldEl) {
+            dateFieldEl.value = getSalesHedgeStartDate(currentInvTrack).toISOString().slice(0, 10);
+        }
+        const instSummary = computeHedgeSummary();
+        const salesSummary = computeSalesTrackSummary(currentInvTrack);
+        const combined = {
+            Gold: {
+                owed: instSummary.Gold.owed + salesSummary.Gold.owed,
+                hedged: instSummary.Gold.hedged + salesSummary.Gold.hedged,
+                toBuy: Math.max(0, (instSummary.Gold.owed + salesSummary.Gold.owed) - (instSummary.Gold.hedged + salesSummary.Gold.hedged))
+            },
+            Silver: {
+                owed: instSummary.Silver.owed + salesSummary.Silver.owed,
+                hedged: instSummary.Silver.hedged + salesSummary.Silver.hedged,
+                toBuy: Math.max(0, (instSummary.Silver.owed + salesSummary.Silver.owed) - (instSummary.Silver.hedged + salesSummary.Silver.hedged))
+            }
+        };
+        const cardsEl = document.getElementById('hedge-summary-cards');
+        const metalCard = (label, icon, s, avgRate) => `
+            <div style="background:var(--surface); border-radius:var(--radius); padding:14px; box-shadow:0 1px 6px rgba(0,0,0,.06);">
+                <div style="font-size:10px; font-weight:700; letter-spacing:.08em; color:var(--text2); text-transform:uppercase; margin-bottom:8px;">${icon} ${label}</div>
+                <div style="font-size:11px; color:var(--text2); margin-bottom:2px;">Owed: <b style="color:var(--text);">${s.owed.toFixed(2)}g</b></div>
+                <div style="font-size:11px; color:var(--text2); margin-bottom:8px;">Hedged: <b style="color:var(--text);">${s.hedged.toFixed(2)}g</b></div>
+                <div style="font-size:20px; font-weight:800; color:${s.toBuy > 0 ? '#C62828' : '#2E7D32'};">${s.toBuy.toFixed(2)}g</div>
+                <div style="font-size:10px; color:var(--text2); margin-bottom:${avgRate ? '6' : '0'}px;">to buy</div>
+                ${avgRate ? `<div style="font-size:10.5px; color:var(--text2); padding-top:6px; border-top:1px solid var(--border);">avg sold @ ₹${avgRate.toFixed(2)}/g</div>` : ''}
+            </div>`;
+        cardsEl.innerHTML = metalCard('Gold', '🟡', combined.Gold, computeCombinedAvgRate('Gold')) + metalCard('Silver', '⚪', combined.Silver, computeCombinedAvgRate('Silver'));
+
+        const pnl = computeHedgePnl();
+        const pnlEl = document.getElementById('hedge-pnl-card');
+        if (!pnl.rows.length) {
+            pnlEl.style.display = 'none';
+            pnlEl.innerHTML = '';
+        } else {
+            pnlEl.style.display = '';
+            const pnlColor = pnl.totalPnl >= 0 ? '#2E7D32' : '#C62828';
+            pnlEl.innerHTML = `
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+                    <div style="font-size:10px; font-weight:700; letter-spacing:.08em; color:var(--text2); text-transform:uppercase;">Hedge P&L</div>
+                    <div style="font-size:18px; font-weight:800; color:${pnlColor};">${pnl.totalPnl >= 0 ? '+' : ''}₹${pnl.totalPnl.toFixed(2)}</div>
+                </div>
+                ${pnl.rows.map(r => `
+                    <div style="display:flex; justify-content:space-between; font-size:12px; padding:4px 0; border-top:1px solid var(--border);">
+                        <span style="color:var(--text2);">${r.customerName} · ${r.metal} · ${r.grams.toFixed(2)}g<br><span style="font-size:10.5px;">Paid ₹${r.rate.toFixed(2)}/g vs booked ₹${r.bookedRate.toFixed(2)}/g</span></span>
+                        <span style="font-weight:700; color:${r.pnl >= 0 ? '#2E7D32' : '#C62828'}; white-space:nowrap;">${r.pnl >= 0 ? '+' : ''}₹${r.pnl.toFixed(2)}</span>
+                    </div>
+                `).join('')}`;
+        }
+
+        const plansEl = document.getElementById('hedge-plans-list');
+        const evaluated = installmentPlans
+            .filter(p => p.status === 'active')
+            .map(p => {
+                const g = getPlanHedgeGrams(p);
+                const hedged = getHedgedGrams(p.id);
+                const owed = { Gold: g.totals.Gold || 0, Silver: g.totals.Silver || 0 };
+                const need = {
+                    Gold: Math.max(0, owed.Gold - (hedged.Gold || 0)),
+                    Silver: Math.max(0, owed.Silver - (hedged.Silver || 0))
+                };
+                return { plan: p, owed, need, unresolved: g.unresolved };
+            })
+            .sort((a, b) => new Date(a.plan.createdAt) - new Date(b.plan.createdAt));
+
+        const bookedRateLine = (x) => {
+            const parts = [];
+            if (x.owed.Gold > 0) {
+                const r = _getAppliedPureRate(x.plan, 'Gold');
+                if (r) parts.push(`🟡 booked @ ₹${r.toFixed(2)}/g`);
+            }
+            if (x.owed.Silver > 0) {
+                const r = _getAppliedPureRate(x.plan, 'Silver');
+                if (r) parts.push(`⚪ booked @ ₹${r.toFixed(2)}/g`);
+            }
+            return parts.length ? `<div style="font-size:11px; color:var(--text2); margin-top:2px;">${parts.join(' · ')}</div>` : '';
+        };
+
+        const planRow = (x, statusLine) => {
+            const entries = hedgeLog.filter(e => e.planId === x.plan.id).sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+            const expanded = _hedgeExpandedPlans.has(x.plan.id);
+            return `
+            <div style="background:var(--surface); border-radius:var(--radius); padding:12px 14px; margin-bottom:8px; box-shadow:0 1px 6px rgba(0,0,0,.06);">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+                    <span style="font-weight:700;">${x.plan.customerName}</span>
+                    <button onclick="openHedgeLogModal('${x.plan.id}')" style="background:none; border:1.5px solid var(--border); color:var(--text); font-weight:700; padding:5px 10px; border-radius:8px; font-size:11.5px; width:auto; margin:0;">+ Log Hedge</button>
+                </div>
+                <div style="font-size:12.5px; color:var(--text2);">${statusLine}</div>
+                ${bookedRateLine(x)}
+                ${x.unresolved > 0 ? `<div style="font-size:11px; color:#C62828; margin-top:4px;">⚠️ ${x.unresolved} item${x.unresolved === 1 ? '' : 's'} couldn't be matched to a current stock record — grams shown may be understated.</div>` : ''}
+                ${entries.length ? `
+                    <div onclick="_toggleHedgePlanEntries('${x.plan.id}')" style="margin-top:8px; padding-top:8px; border-top:1px solid var(--border); font-size:11px; font-weight:700; color:var(--text2); cursor:pointer; user-select:none;">
+                        ${expanded ? '▾' : '▸'} ${entries.length} purchase${entries.length === 1 ? '' : 's'} logged
+                    </div>
+                    ${expanded ? `<div style="margin-top:6px;">${entries.map(e => _hedgeEntryRow(e)).join('')}</div>` : ''}
+                ` : ''}
+            </div>`;
+        };
+
+        const needsAttention = [];
+        const settled = [];
+        evaluated.forEach(x => {
+            const needsHedge = x.need.Gold > 0 || x.need.Silver > 0;
+            if (needsHedge || x.unresolved > 0) needsAttention.push(x);
+            else settled.push(x);
+        });
+
+        let html = '';
+        if (needsAttention.length) {
+            html += needsAttention.map(x => {
+                const statusLine = `
+                    ${x.need.Gold > 0 ? `🟡 Gold: <b style="color:var(--text);">${x.need.Gold.toFixed(2)}g</b> needed` : ''}
+                    ${x.need.Gold > 0 && x.need.Silver > 0 ? ' · ' : ''}
+                    ${x.need.Silver > 0 ? `⚪ Silver: <b style="color:var(--text);">${x.need.Silver.toFixed(2)}g</b> needed` : ''}
+                    ${(x.need.Gold <= 0 && x.need.Silver <= 0 && x.unresolved > 0) ? 'Grams unknown' : ''}`;
+                return planRow(x, statusLine);
+            }).join('');
+        }
+        if (settled.length) {
+            html += `
+                <div onclick="_toggleHedgeSettled()" style="display:flex; justify-content:space-between; align-items:center; padding:10px 14px; margin-top:4px; cursor:pointer; user-select:none; color:var(--text2); font-size:12.5px; font-weight:700;">
+                    <span>${_hedgeSettledExpanded ? '▾' : '▸'} Already Hedged (${settled.length})</span>
+                </div>
+                ${_hedgeSettledExpanded ? settled.map(x => {
+                    const totalOwed = x.owed.Gold + x.owed.Silver;
+                    const statusLine = totalOwed > 0
+                        ? `<span style="color:#2E7D32;">✓ Fully hedged (${totalOwed.toFixed(2)}g)</span>`
+                        : `<span style="color:var(--text2);">— No gold/silver items in this plan</span>`;
+                    return planRow(x, statusLine);
+                }).join('') : ''}`;
+        }
+        plansEl.innerHTML = html;
+        document.getElementById('hedge-plans-section').style.display = evaluated.length ? '' : 'none';
+
+        // Regular sales — track-scoped, plus manual owed entries
+        const salesTrackEl = document.getElementById('hedge-sales-track');
+        if (salesTrackEl) {
+            const track = currentInvTrack;
+            const bucketId = SALES_HEDGE_BUCKET[track];
+            const trackStartDate = getSalesHedgeStartDate(track);
+            const salesEntries = hedgeLog
+                .filter(e => e.planId === bucketId && new Date(e.createdAt) >= trackStartDate)
+                .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+            const owedEntries = manualOwedLog
+                .filter(e => e.track === track && new Date(e.createdAt) >= trackStartDate)
+                .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+            const owedExpandKey = bucketId + '_owed';
+            const owedExpanded = _hedgeExpandedPlans.has(owedExpandKey);
+            const salesExpanded = _hedgeExpandedPlans.has(bucketId);
+            const need = { Gold: salesSummary.Gold.toBuy, Silver: salesSummary.Silver.toBuy };
+            const totalOwed = salesSummary.Gold.owed + salesSummary.Silver.owed;
+            let salesStatusLine;
+            if (need.Gold > 0 || need.Silver > 0) {
+                salesStatusLine = `
+                    ${need.Gold > 0 ? `🟡 Gold: <b style="color:var(--text);">${need.Gold.toFixed(2)}g</b> needed` : ''}
+                    ${need.Gold > 0 && need.Silver > 0 ? ' · ' : ''}
+                    ${need.Silver > 0 ? `⚪ Silver: <b style="color:var(--text);">${need.Silver.toFixed(2)}g</b> needed` : ''}`;
+            } else if (totalOwed > 0) {
+                salesStatusLine = `<span style="color:#2E7D32;">✓ Fully hedged (${totalOwed.toFixed(2)}g)</span>`;
+            } else {
+                salesStatusLine = `<span style="color:var(--text2);">No gold/silver sold since ${trackStartDate.toLocaleDateString('en-IN')}.</span>`;
+            }
+            const avgRateParts = [];
+            if (salesSummary.Gold.owed > 0) {
+                const r = getSalesTrackWeightedRate(track, 'Gold');
+                if (r) avgRateParts.push(`🟡 avg sold @ ₹${r.toFixed(2)}/g`);
+            }
+            if (salesSummary.Silver.owed > 0) {
+                const r = getSalesTrackWeightedRate(track, 'Silver');
+                if (r) avgRateParts.push(`⚪ avg sold @ ₹${r.toFixed(2)}/g`);
+            }
+            const avgRateLine = avgRateParts.length ? `<div style="font-size:11px; color:var(--text2); margin-top:2px;">${avgRateParts.join(' · ')}</div>` : '';
+            salesTrackEl.innerHTML = `
+                <div style="background:var(--surface); border-radius:var(--radius); padding:12px 14px; margin-bottom:8px; box-shadow:0 1px 6px rgba(0,0,0,.06);">
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+                        <span style="font-weight:700;">Sales</span>
+                        <div style="display:flex; align-items:center; gap:6px;">
+                            <button onclick="openManualOwedModal()" title="Add a durable owed entry" style="background:none; border:1.5px solid var(--border); color:var(--text2); font-weight:700; padding:5px 10px; border-radius:8px; font-size:11.5px; width:auto; margin:0;">+ Add Owed</button>
+                            <button onclick="openHedgeLogModal('${bucketId}')" style="background:none; border:1.5px solid var(--border); color:var(--text); font-weight:700; padding:5px 10px; border-radius:8px; font-size:11.5px; width:auto; margin:0;">+ Log Hedge</button>
+                        </div>
+                    </div>
+                    <div style="font-size:12.5px; color:var(--text2);">${salesStatusLine}</div>
+                    ${avgRateLine}
+                    ${owedEntries.length ? `
+                        <div onclick="_toggleHedgePlanEntries('${owedExpandKey}')" style="margin-top:8px; padding-top:8px; border-top:1px solid var(--border); font-size:11px; font-weight:700; color:var(--text2); cursor:pointer; user-select:none;">
+                            ${owedExpanded ? '▾' : '▸'} ${owedEntries.length} manual owed entr${owedEntries.length === 1 ? 'y' : 'ies'}
+                        </div>
+                        ${owedExpanded ? `<div style="margin-top:6px;">${owedEntries.map(e => `
+                            <div style="display:flex; justify-content:space-between; align-items:center; background:var(--surface); border-radius:var(--radius); padding:10px 14px; margin-bottom:8px; box-shadow:0 1px 6px rgba(0,0,0,.06);">
+                                <div style="font-size:12.5px;">
+                                    <b>${e.metal}</b> · ${(e.grams || 0).toFixed(2)}g owed
+                                    <div style="font-size:10.5px; color:var(--text2);">${e.date || ''}${e.note ? ' · ' + e.note.replace(/</g, '&lt;') : ''}</div>
+                                </div>
+                                <div style="display:flex; align-items:center; gap:8px;">
+                                    <button onclick="openManualOwedModal('${e.id}')" title="Edit" style="background:none; border:1.5px solid var(--border); color:var(--text); font-weight:700; padding:5px 10px; border-radius:8px; font-size:11px; width:auto; margin:0;">Edit</button>
+                                    <button onclick="deleteManualOwedEntry('${e.id}')" title="Remove" style="background:none; border:none; color:#C62828; font-size:16px; padding:0; width:auto; box-shadow:none; margin:0;">✕</button>
+                                </div>
+                            </div>
+                        `).join('')}</div>` : ''}
+                    ` : ''}
+                    ${salesEntries.length ? `
+                        <div onclick="_toggleHedgePlanEntries('${bucketId}')" style="margin-top:8px; padding-top:8px; border-top:1px solid var(--border); font-size:11px; font-weight:700; color:var(--text2); cursor:pointer; user-select:none;">
+                            ${salesExpanded ? '▾' : '▸'} ${salesEntries.length} purchase${salesEntries.length === 1 ? '' : 's'} logged
+                        </div>
+                        ${salesExpanded ? `<div style="margin-top:6px;">${salesEntries.map(e => _hedgeEntryRow(e)).join('')}</div>` : ''}
+                    ` : ''}
+                </div>`;
+        }
+    }
+
+    // ── Hedge purchase modal ──
+    function openHedgeLogModal(planId, entryId){
+        const editing = !!entryId;
+        const existing = editing ? hedgeLog.find(e => e.id === entryId) : null;
+        document.getElementById('hedge-log-entry-id').value = entryId || '';
+        document.getElementById('hedge-log-plan-id').value = existing ? (existing.planId || '') : (planId || '');
+        const noteEl = document.getElementById('hedge-log-plan-note');
+        const metalSelect = document.getElementById('hedge-log-metal');
+        const effectivePlanId = existing ? existing.planId : planId;
+
+        document.getElementById('hedge-log-grams').value = existing ? existing.grams : '';
+        document.getElementById('hedge-log-rate').value = existing ? existing.rate : '';
+        document.getElementById('hedge-log-note').value = existing ? (existing.note || '') : '';
+        document.getElementById('hedge-log-title').textContent = editing ? 'Edit Hedge Purchase' : (effectivePlanId ? 'Log Hedge Purchase' : 'Log Purchase');
+
+        const salesTrack = effectivePlanId === SALES_HEDGE_BUCKET.A ? 'A' : (effectivePlanId === SALES_HEDGE_BUCKET.B ? 'B' : null);
+
+        if (salesTrack) {
+            noteEl.style.display = 'block';
+            noteEl.textContent = 'For regular sales';
+            if (existing) {
+                metalSelect.value = existing.metal;
+            } else {
+                const owed = getSalesTrackGrams(salesTrack);
+                const hedged = getHedgedGramsSinceForTrack(salesTrack);
+                const goldNeed = (owed.Gold || 0) - (hedged.Gold || 0);
+                const silverNeed = (owed.Silver || 0) - (hedged.Silver || 0);
+                metalSelect.value = (silverNeed > 0 && goldNeed <= 0) ? 'Silver' : 'Gold';
+            }
+        } else if (effectivePlanId) {
+            const plan = installmentPlans.find(p => p.id === effectivePlanId);
+            if (plan) {
+                noteEl.style.display = 'block';
+                noteEl.textContent = `For ${plan.customerName}'s plan`;
+                if (existing) {
+                    metalSelect.value = existing.metal;
+                } else {
+                    const g = getPlanHedgeGrams(plan);
+                    const hedged = getHedgedGrams(effectivePlanId);
+                    const goldNeed = (g.totals.Gold || 0) - (hedged.Gold || 0);
+                    const silverNeed = (g.totals.Silver || 0) - (hedged.Silver || 0);
+                    metalSelect.value = (silverNeed > 0 && goldNeed <= 0) ? 'Silver' : 'Gold';
+                }
+            } else {
+                noteEl.style.display = 'none';
+            }
+        } else {
+            noteEl.style.display = 'none';
+            metalSelect.value = existing ? existing.metal : 'Gold';
+        }
+
+        document.getElementById('hedge-log-save-btn').textContent = editing ? '✓ Save Changes' : '✓ Save Purchase';
+        document.getElementById('hedge-log-modal').classList.add('show');
+    }
+
+    function closeHedgeLogModal(){
+        document.getElementById('hedge-log-modal').classList.remove('show');
+    }
+
+    async function saveHedgeLogEntry(){
+        const entryId = document.getElementById('hedge-log-entry-id').value || null;
+        const planId = document.getElementById('hedge-log-plan-id').value || null;
+        const metal = document.getElementById('hedge-log-metal').value;
+        const grams = parseFloat(document.getElementById('hedge-log-grams').value) || 0;
+        const rate = parseFloat(document.getElementById('hedge-log-rate').value) || 0;
+        const note = document.getElementById('hedge-log-note').value.trim();
+        if (grams <= 0) { showCustomAlert('Enter grams purchased.'); return; }
+
+        if (entryId) {
+            const existing = hedgeLog.find(e => e.id === entryId);
+            if (!existing) { closeHedgeLogModal(); return; }
+            const updated = { ...existing, metal, grams, rate, note: note || null, amount: rate ? +(grams * rate).toFixed(2) : 0 };
+            try {
+                await window.dbUpdate(window.dbRef(window.firebaseDB, 'hedgeLog'), { [entryId]: updated });
+                Object.assign(existing, updated);
+                closeHedgeLogModal();
+                renderHedgeDashboard();
+            } catch (e) {
+                console.error('[HedgeLog] update failed', e);
+                showCustomAlert(window._writeAllowed ? 'Could not save — try again.' : 'Writes are disabled — this copy is running in read-only mode.');
+            }
+            return;
+        }
+
+        const id = crypto.randomUUID();
+        const entry = {
+            id, planId, metal, grams, rate, note: note || null,
+            amount: rate ? +(grams * rate).toFixed(2) : 0,
+            date: new Date().toISOString().slice(0, 10),
+            createdAt: new Date().toISOString()
+        };
+        try {
+            await window.dbUpdate(window.dbRef(window.firebaseDB, 'hedgeLog'), { [id]: entry });
+            hedgeLog.unshift(entry);
+            closeHedgeLogModal();
+            renderHedgeDashboard();
+        } catch (e) {
+            console.error('[HedgeLog] save failed', e);
+            showCustomAlert(window._writeAllowed ? 'Could not save — try again.' : 'Writes are disabled — this copy is running in read-only mode.');
+        }
+    }
+
+    async function deleteHedgeLogEntry(id){
+        showCustomConfirm('Delete this hedge purchase record?', 'Confirm', async () => {
+            try {
+                await window.dbUpdate(window.dbRef(window.firebaseDB, 'hedgeLog'), { [id]: null });
+                hedgeLog = hedgeLog.filter(e => e.id !== id);
+                renderHedgeDashboard();
+            } catch (e) {
+                console.error('[HedgeLog] delete failed', e);
+                showCustomAlert(window._writeAllowed ? 'Could not delete — try again.' : 'Writes are disabled — this copy is running in read-only mode.');
+            }
+        });
+    }
+
+    // ── Manual owed modal ──
+    function openManualOwedModal(entryId){
+        const editing = !!entryId;
+        const existing = editing ? manualOwedLog.find(e => e.id === entryId) : null;
+        document.getElementById('manual-owed-entry-id').value = entryId || '';
+        document.getElementById('manual-owed-metal').value = existing ? existing.metal : 'Gold';
+        document.getElementById('manual-owed-grams').value = existing ? existing.grams : '';
+        document.getElementById('manual-owed-note').value = existing ? (existing.note || '') : '';
+        document.getElementById('manual-owed-title').textContent = editing ? 'Edit Owed Entry' : 'Add Owed Entry';
+        document.getElementById('manual-owed-save-btn').textContent = editing ? '✓ Save Changes' : '✓ Save';
+        document.getElementById('manual-owed-modal').classList.add('show');
+    }
+
+    function closeManualOwedModal(){
+        document.getElementById('manual-owed-modal').classList.remove('show');
+    }
+
+    async function saveManualOwedEntry(){
+        const entryId = document.getElementById('manual-owed-entry-id').value || null;
+        const metal = document.getElementById('manual-owed-metal').value;
+        const grams = parseFloat(document.getElementById('manual-owed-grams').value) || 0;
+        const note = document.getElementById('manual-owed-note').value.trim();
+        if (grams <= 0) { showCustomAlert('Enter grams owed.'); return; }
+
+        if (entryId) {
+            const existing = manualOwedLog.find(e => e.id === entryId);
+            if (!existing) { closeManualOwedModal(); return; }
+            const updated = { ...existing, metal, grams, note: note || null };
+            try {
+                await window.dbUpdate(window.dbRef(window.firebaseDB, 'manualOwedLog'), { [entryId]: updated });
+                Object.assign(existing, updated);
+                closeManualOwedModal();
+                renderHedgeDashboard();
+            } catch (e) {
+                console.error('[ManualOwedLog] update failed', e);
+                showCustomAlert(window._writeAllowed ? 'Could not save — try again.' : 'Writes are disabled — this copy is running in read-only mode.');
+            }
+            return;
+        }
+
+        const id = crypto.randomUUID();
+        const entry = {
+            id, track: currentInvTrack, metal, grams, note: note || null,
+            date: new Date().toISOString().slice(0, 10),
+            createdAt: new Date().toISOString()
+        };
+        try {
+            await window.dbUpdate(window.dbRef(window.firebaseDB, 'manualOwedLog'), { [id]: entry });
+            manualOwedLog.unshift(entry);
+            closeManualOwedModal();
+            renderHedgeDashboard();
+        } catch (e) {
+            console.error('[ManualOwedLog] save failed', e);
+            showCustomAlert(window._writeAllowed ? 'Could not save — try again.' : 'Writes are disabled — this copy is running in read-only mode.');
+        }
+    }
+
+    async function deleteManualOwedEntry(id){
+        showCustomConfirm('Delete this owed entry?', 'Confirm', async () => {
+            try {
+                await window.dbUpdate(window.dbRef(window.firebaseDB, 'manualOwedLog'), { [id]: null });
+                manualOwedLog = manualOwedLog.filter(e => e.id !== id);
+                renderHedgeDashboard();
+            } catch (e) {
+                console.error('[ManualOwedLog] delete failed', e);
+                showCustomAlert(window._writeAllowed ? 'Could not delete — try again.' : 'Writes are disabled — this copy is running in read-only mode.');
+            }
+        });
+    }
+
+    // ── Boot ──
+    document.addEventListener('DOMContentLoaded', async () => {
+        await window.getAuthReadyPromise();
+        startCoreDataSync();
+        startSalesHedgeDatesSync();
+        startManualOwedSync();
+        renderHedgeDashboard();
+    });
+</script>
+
+</body>
+</html>
