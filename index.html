@@ -137,13 +137,13 @@
         }
         #pm-content { flex: 1; overflow-y: auto; padding: 14px; max-width: 600px; margin: 0 auto; width: 100%; box-sizing: border-box; }
 
-        #hedge-log-modal, #manual-owed-modal, #pm-alert-modal, #settle-partial-modal {
+        #purchase-modal, #payment-modal, #manual-owed-modal, #pm-alert-modal {
             display: none; position: fixed; inset: 0;
             background: rgba(0,0,0,0.55); z-index: 1150;
             align-items: flex-end; justify-content: center;
         }
-        #hedge-log-modal.show, #manual-owed-modal.show, #pm-alert-modal.show, #settle-partial-modal.show { display: flex; }
-        #hedge-log-panel, #manual-owed-panel, #pm-alert-panel, #settle-partial-panel {
+        #purchase-modal.show, #payment-modal.show, #manual-owed-modal.show, #pm-alert-modal.show { display: flex; }
+        #purchase-panel, #payment-panel, #manual-owed-panel, #pm-alert-panel {
             background: white; border-radius: 20px 20px 0 0;
             width: 100%; max-width: 480px;
             padding: 22px 20px 30px;
@@ -179,7 +179,8 @@
 
     <div id="pm-tabs" style="display:flex; border-bottom:1px solid var(--border); background:var(--surface);">
         <div id="pm-tab-sales" onclick="pmSwitchTab('sales')" style="flex:1; display:flex; align-items:center; justify-content:center; padding:13px 4px; font-size:13px; font-weight:700; border-right:1px solid var(--border); background:transparent; cursor:pointer; color:var(--text2); text-align:center; user-select:none;">📈 Sales</div>
-        <div id="pm-tab-purchase" onclick="pmSwitchTab('purchase')" style="flex:1; display:flex; align-items:center; justify-content:center; padding:13px 4px; font-size:13px; font-weight:700; background:transparent; cursor:pointer; color:var(--text2); text-align:center; user-select:none;">🛡️ Purchase</div>
+        <div id="pm-tab-purchase" onclick="pmSwitchTab('purchase')" style="flex:1; display:flex; align-items:center; justify-content:center; padding:13px 4px; font-size:13px; font-weight:700; border-right:1px solid var(--border); background:transparent; cursor:pointer; color:var(--text2); text-align:center; user-select:none;">🛒 Purchase</div>
+        <div id="pm-tab-payment" onclick="pmSwitchTab('payment')" style="flex:1; display:flex; align-items:center; justify-content:center; padding:13px 4px; font-size:13px; font-weight:700; background:transparent; cursor:pointer; color:var(--text2); text-align:center; user-select:none;">💳 Payment</div>
     </div>
 
     <div id="pm-content">
@@ -226,85 +227,109 @@
 
             <div id="hedge-sales-track" style="margin-bottom:20px;"></div>
         </div>
+
+        <div id="pm-pane-payment" style="display:none;">
+            <p class="note" style="margin:0 0 12px;">Only parties with outstanding credit on the current track are shown.</p>
+            <div id="payment-party-list" style="margin-bottom:20px;"></div>
+            <div style="font-size:10px; font-weight:700; letter-spacing:.08em; color:var(--text2); text-transform:uppercase; margin-bottom:8px;">Payment History — Current Track</div>
+            <div id="payment-history-list"></div>
+        </div>
     </div>
 </div>
 
-<div id="hedge-log-modal">
-    <div id="hedge-log-panel">
+<div id="purchase-modal">
+    <div id="purchase-panel">
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
-            <h3 id="hedge-log-title" style="margin:0; font-size:18px; color:#1a1a1a;">Log Hedge Purchase</h3>
-            <button onclick="closeHedgeLogModal()" style="background:none; border:none; font-size:22px; color:#aaa; padding:0; width:auto; box-shadow:none; margin:0;">✕</button>
+            <h3 id="purchase-title" style="margin:0; font-size:18px; color:#1a1a1a;">New Purchase</h3>
+            <button onclick="closePurchaseModal()" style="background:none; border:none; font-size:22px; color:#aaa; padding:0; width:auto; box-shadow:none; margin:0;">✕</button>
         </div>
-        <input type="hidden" id="hedge-log-plan-id" value="">
-        <input type="hidden" id="hedge-log-entry-id" value="">
-        <p class="note" id="hedge-log-plan-note" style="display:none; margin-bottom:14px;"></p>
+        <input type="hidden" id="purchase-id" value="">
+        <input type="hidden" id="purchase-plan-id" value="">
+
+        <label style="font-size:12px; font-weight:700; color:#888; margin:0 0 4px 0;">PARTY</label>
+        <select id="purchase-party" style="padding:10px 12px; border:1.5px solid #e0e0e0; border-radius:10px; width:100%; font-size:14px; margin-bottom:14px; box-sizing:border-box;"></select>
 
         <label style="font-size:12px; font-weight:700; color:#888; margin:0 0 4px 0;">METAL</label>
-        <select id="hedge-log-metal" style="padding:10px 12px; border:1.5px solid #e0e0e0; border-radius:10px; width:100%; font-size:14px; margin-bottom:14px; box-sizing:border-box;">
+        <select id="purchase-metal" style="padding:10px 12px; border:1.5px solid #e0e0e0; border-radius:10px; width:100%; font-size:14px; margin-bottom:14px; box-sizing:border-box;">
             <option value="Gold">Gold</option>
             <option value="Silver">Silver</option>
         </select>
 
-        <label style="font-size:12px; font-weight:700; color:#888; margin:0 0 4px 0;">GRAMS PURCHASED</label>
-        <input type="number" id="hedge-log-grams" placeholder="e.g. 12.5" step="0.01" min="0"
+        <label style="font-size:12px; font-weight:700; color:#888; margin:0 0 4px 0;">WEIGHT (24K/999 PURE-EQUIVALENT)</label>
+        <input type="number" id="purchase-weight" placeholder="e.g. 12.5" step="0.01" min="0"
                style="padding:10px 12px; border:1.5px solid #e0e0e0; border-radius:10px; width:100%; font-size:14px; margin-bottom:14px; box-sizing:border-box;">
 
-        <label style="font-size:12px; font-weight:700; color:#888; margin:0 0 4px 0;">DATE OF PURCHASE</label>
-        <input type="date" id="hedge-log-date"
+        <label style="font-size:12px; font-weight:700; color:#888; margin:0 0 4px 0;">DATE</label>
+        <input type="date" id="purchase-date"
                style="padding:10px 12px; border:1.5px solid #e0e0e0; border-radius:10px; width:100%; font-size:14px; margin-bottom:14px; box-sizing:border-box;">
 
-        <label id="hedge-log-credit-row" style="display:flex; align-items:center; gap:8px; margin-bottom:14px; cursor:pointer;">
-            <input type="checkbox" id="hedge-log-is-credit" onchange="onHedgeLogCreditToggle()" style="width:auto; margin:0;">
-            <span style="font-size:13px; color:#555;">Credit purchase — settle later, in one or more portions</span>
-        </label>
+        <div id="purchase-track-row" style="margin-bottom:14px;">
+            <p class="note">Logged against Track <span id="purchase-track-label"></span> — the track you're currently viewing.</p>
+        </div>
 
-        <div id="hedge-log-rate-field">
+        <div id="purchase-status-row" style="margin-bottom:14px;">
+            <label style="font-size:12px; font-weight:700; color:#888; margin:0 0 4px 0;">STATUS</label>
+            <select id="purchase-status" onchange="onPurchaseCreditToggle()" style="padding:10px 12px; border:1.5px solid #e0e0e0; border-radius:10px; width:100%; font-size:14px; box-sizing:border-box;">
+                <option value="paid">Paid</option>
+                <option value="credit">Credit</option>
+            </select>
+        </div>
+
+        <div id="purchase-rate-field">
             <label style="font-size:12px; font-weight:700; color:#888; margin:0 0 4px 0;">RATE PAID (₹/gram)</label>
-            <input type="number" id="hedge-log-rate" placeholder="e.g. 6250 — leave blank for a barter/melt exchange" step="0.01" min="0"
+            <input type="number" id="purchase-rate" placeholder="e.g. 6250" step="0.01" min="0"
                    style="padding:10px 12px; border:1.5px solid #e0e0e0; border-radius:10px; width:100%; font-size:14px; margin-bottom:14px; box-sizing:border-box;">
         </div>
-        <p class="note" id="hedge-log-credit-note" style="display:none; margin:0 0 14px;">Credit purchases have no upfront rate — you'll settle each portion (cash or metal) separately as it's paid, each at its own date and rate.</p>
+        <p class="note" id="purchase-credit-note" style="display:none; margin:0 0 14px;">Credit purchases have no rate yet — you'll log Payments against this party separately, each at its own rate, as it's settled.</p>
 
         <label style="font-size:12px; font-weight:700; color:#888; margin:0 0 4px 0;">NOTE (OPTIONAL)</label>
-        <input type="text" id="hedge-log-note" placeholder="e.g. Melt exchange, Cash purchase…"
+        <input type="text" id="purchase-note" placeholder="e.g. Melt exchange, Cash purchase…"
                style="padding:10px 12px; border:1.5px solid #e0e0e0; border-radius:10px; width:100%; font-size:14px; margin-bottom:16px; box-sizing:border-box;">
 
-        <button onclick="saveHedgeLogEntry()" id="hedge-log-save-btn"
+        <button onclick="savePurchase()" id="purchase-save-btn"
             style="width:100%; padding:14px; background:var(--gold); color:white; border:none; border-radius:12px; font-size:16px; font-weight:800;">
             ✓ Save Purchase
         </button>
     </div>
 </div>
 
-<div id="settle-partial-modal">
-    <div id="settle-partial-panel">
+<div id="payment-modal">
+    <div id="payment-panel">
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
-            <h3 id="settle-partial-title" style="margin:0; font-size:18px; color:#1a1a1a;">Settle Partial</h3>
-            <button onclick="closeSettlePartialModal()" style="background:none; border:none; font-size:22px; color:#aaa; padding:0; width:auto; box-shadow:none; margin:0;">✕</button>
+            <h3 id="payment-title" style="margin:0; font-size:18px; color:#1a1a1a;">New Payment</h3>
+            <button onclick="closePaymentModal()" style="background:none; border:none; font-size:22px; color:#aaa; padding:0; width:auto; box-shadow:none; margin:0;">✕</button>
         </div>
-        <input type="hidden" id="settle-entry-id" value="">
-        <input type="hidden" id="settle-settlement-id" value="">
-        <p class="note" id="settle-remaining-note" style="margin-bottom:14px;"></p>
+        <input type="hidden" id="payment-id" value="">
+        <p class="note" id="payment-balance-note" style="margin-bottom:14px;"></p>
 
-        <label style="font-size:12px; font-weight:700; color:#888; margin:0 0 4px 0;">GRAMS SETTLED</label>
-        <input type="number" id="settle-grams" placeholder="e.g. 3" step="0.01" min="0"
+        <label style="font-size:12px; font-weight:700; color:#888; margin:0 0 4px 0;">PARTY</label>
+        <select id="payment-party" style="padding:10px 12px; border:1.5px solid #e0e0e0; border-radius:10px; width:100%; font-size:14px; margin-bottom:14px; box-sizing:border-box;"></select>
+
+        <label style="font-size:12px; font-weight:700; color:#888; margin:0 0 4px 0;">METAL</label>
+        <select id="payment-metal" style="padding:10px 12px; border:1.5px solid #e0e0e0; border-radius:10px; width:100%; font-size:14px; margin-bottom:14px; box-sizing:border-box;">
+            <option value="Gold">Gold</option>
+            <option value="Silver">Silver</option>
+        </select>
+
+        <label style="font-size:12px; font-weight:700; color:#888; margin:0 0 4px 0;">WEIGHT PAID</label>
+        <input type="number" id="payment-weight" placeholder="e.g. 3" step="0.01" min="0"
                style="padding:10px 12px; border:1.5px solid #e0e0e0; border-radius:10px; width:100%; font-size:14px; margin-bottom:14px; box-sizing:border-box;">
 
-        <label style="font-size:12px; font-weight:700; color:#888; margin:0 0 4px 0;">DATE SETTLED</label>
-        <input type="date" id="settle-date"
+        <label style="font-size:12px; font-weight:700; color:#888; margin:0 0 4px 0;">DATE</label>
+        <input type="date" id="payment-date"
                style="padding:10px 12px; border:1.5px solid #e0e0e0; border-radius:10px; width:100%; font-size:14px; margin-bottom:14px; box-sizing:border-box;">
 
         <label style="font-size:12px; font-weight:700; color:#888; margin:0 0 4px 0;">RATE PAID (₹/gram)</label>
-        <input type="number" id="settle-rate" placeholder="e.g. 6250 — leave blank if settled in metal" step="0.01" min="0"
+        <input type="number" id="payment-rate" placeholder="e.g. 6250 — leave blank if paid in metal" step="0.01" min="0"
                style="padding:10px 12px; border:1.5px solid #e0e0e0; border-radius:10px; width:100%; font-size:14px; margin-bottom:14px; box-sizing:border-box;">
 
         <label style="font-size:12px; font-weight:700; color:#888; margin:0 0 4px 0;">NOTE (OPTIONAL)</label>
-        <input type="text" id="settle-note" placeholder="e.g. Partial 1 of 2"
+        <input type="text" id="payment-note" placeholder="e.g. Partial 1 of 2"
                style="padding:10px 12px; border:1.5px solid #e0e0e0; border-radius:10px; width:100%; font-size:14px; margin-bottom:16px; box-sizing:border-box;">
 
-        <button onclick="saveSettlement()" id="settle-save-btn"
+        <button onclick="savePayment()" id="payment-save-btn"
             style="width:100%; padding:14px; background:var(--gold); color:white; border:none; border-radius:12px; font-size:16px; font-weight:800;">
-            ✓ Save Settlement
+            ✓ Save Payment
         </button>
     </div>
 </div>
@@ -395,7 +420,8 @@
     let _pmTapCount = 0, _pmTapTimer = null;
     function _pmRerenderActiveTab(){
         if (_pmActiveTab === 'sales') renderSalesReport();
-        else renderHedgeDashboard();
+        else if (_pmActiveTab === 'payment') renderPaymentTab();
+        else renderPurchaseTab();
     }
     function pmHandleBrandTap() {
         if (currentInvTrack === 'B') {
@@ -424,7 +450,9 @@
     let productData = {};
     let rates = { gold: {}, silver: {} };
     let baseCalcDefaults = {};
-    let hedgeLog = [];
+    let parties = [];
+    let purchases = [];
+    let payments = [];
 
     function _objToArraySimple(obj) {
         if (!obj) return [];
@@ -456,11 +484,41 @@
             _pmRerenderActiveTab();
         }, err => console.error('[Installments] read error', err));
 
-        window.dbOnValue(window.dbRef(window.firebaseDB, 'hedgeLog'), snap => {
+        window.dbOnValue(window.dbRef(window.firebaseDB, 'parties'), snap => {
             const val = snap.val() || {};
-            hedgeLog = Object.values(val).sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+            parties = Object.values(val).sort((a, b) => (a.name || '').localeCompare(b.name || ''));
             _pmRerenderActiveTab();
-        }, err => console.error('[HedgeLog] read error', err));
+        }, err => console.error('[Parties] read error', err));
+
+        window.dbOnValue(window.dbRef(window.firebaseDB, 'purchases'), snap => {
+            const val = snap.val() || {};
+            purchases = Object.values(val).sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+            _pmRerenderActiveTab();
+        }, err => console.error('[Purchases] read error', err));
+
+        window.dbOnValue(window.dbRef(window.firebaseDB, 'payments'), snap => {
+            const val = snap.val() || {};
+            payments = Object.values(val).sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+            _pmRerenderActiveTab();
+        }, err => console.error('[Payments] read error', err));
+    }
+
+    async function addParty(name){
+        name = (name || '').trim();
+        if (!name) return null;
+        const existing = parties.find(p => p.name.toLowerCase() === name.toLowerCase());
+        if (existing) return existing.id;
+        const id = crypto.randomUUID();
+        try {
+            await window.dbUpdate(window.dbRef(window.firebaseDB, 'parties'), { [id]: { id, name } });
+            parties.push({ id, name });
+            parties.sort((a, b) => a.name.localeCompare(b.name));
+            return id;
+        } catch (e) {
+            console.error('[Parties] add failed', e);
+            showCustomAlert(window._writeAllowed ? 'Could not add party — try again.' : 'Writes are disabled — this copy is running in read-only mode.');
+            return null;
+        }
     }
 
     function getPureRate(metal) {
@@ -518,16 +576,18 @@
         return { totals, unresolved };
     }
 
-    function getHedgedGrams(planId){
+    // Total weight purchased for one plan — credit AND paid purchases
+    // both count, since the metal is physically in hand either way,
+    // regardless of payment status.
+    function getPurchasedForPlan(planId){
         const totals = {};
-        hedgeLog.forEach(e => {
-            if (planId !== undefined && (e.planId || null) !== planId) return;
-            totals[e.metal] = (totals[e.metal] || 0) + (e.grams || 0);
+        purchases.forEach(p => {
+            if ((p.planId || null) !== planId) return;
+            totals[p.metal] = (totals[p.metal] || 0) + (p.weight || 0);
         });
         return totals;
     }
 
-    const SALES_HEDGE_BUCKET = { A: '__sales_a__', B: '__sales_b__' };
     const SALES_HEDGE_START_DATE = new Date('2026-07-21T00:00:00');
 
     let salesHedgeStartDates = { A: null, B: null };
@@ -552,7 +612,7 @@
         try {
             await window.dbUpdate(window.dbRef(window.firebaseDB, 'hedgeSalesStartDates'), { [track]: dateStr });
             salesHedgeStartDates[track] = dateStr;
-            renderHedgeDashboard();
+            renderPurchaseTab();
         } catch (e) {
             console.error('[SalesHedgeDates] set failed', e);
             showCustomAlert(window._writeAllowed ? 'Could not save — try again.' : 'Writes are disabled — this copy is running in read-only mode.');
@@ -607,16 +667,43 @@
         return totals;
     }
 
-    function getHedgedGramsSinceForTrack(track){
+    // General (non-plan-linked) purchases for one track, since that
+    // track's own "Count sales since" date — same window the Owed side
+    // already uses. Plan-linked purchases are never counted here (see
+    // getPurchasedForPlan) — metal earmarked for a specific plan isn't
+    // available stock for the general track.
+    function getPurchasedForTrack(track){
         const startDate = getSalesHedgeStartDate(track);
-        const bucketId = SALES_HEDGE_BUCKET[track];
         const totals = {};
-        hedgeLog.forEach(e => {
-            if ((e.planId || null) !== bucketId) return;
-            if (new Date(e.createdAt) < startDate) return;
-            totals[e.metal] = (totals[e.metal] || 0) + (e.grams || 0);
+        purchases.forEach(p => {
+            if (p.planId) return;
+            if (p.track !== track) return;
+            if (new Date(p.createdAt) < startDate) return;
+            totals[p.metal] = (totals[p.metal] || 0) + (p.weight || 0);
         });
         return totals;
+    }
+
+    // Outstanding credit balance for one party, on one track, in one
+    // metal — purchases bought on credit minus payments made against
+    // that same party+track+metal pool. Plan-linked purchases are never
+    // credit (the Purchase modal hides the credit toggle when opened
+    // from a plan — the whole point of a plan-specific purchase is
+    // locking in the rate immediately), so this pool never overlaps
+    // with per-plan tracking.
+    function getPartyCreditBalance(partyId, track, metal){
+        const purchased = purchases
+            .filter(p => p.partyId === partyId && p.track === track && p.metal === metal && p.status === 'credit')
+            .reduce((s, p) => s + (p.weight || 0), 0);
+        const paid = payments
+            .filter(pay => pay.partyId === partyId && pay.track === track && pay.metal === metal)
+            .reduce((s, pay) => s + (pay.weight || 0), 0);
+        return Math.max(0, purchased - paid);
+    }
+
+    function getPartyName(partyId){
+        const p = parties.find(x => x.id === partyId);
+        return p ? p.name : 'Unknown';
     }
 
     function computeHedgeSummary(){
@@ -628,28 +715,30 @@
             owed.Silver += g.totals.Silver || 0;
             if (g.unresolved > 0) unresolvedPlans++;
         });
-        const hedged = { Gold: 0, Silver: 0 };
-        hedgeLog.forEach(e => {
-            if (e.planId === SALES_HEDGE_BUCKET.A || e.planId === SALES_HEDGE_BUCKET.B) return;
-            hedged[e.metal] = (hedged[e.metal] || 0) + (e.grams || 0);
+        const purchased = { Gold: 0, Silver: 0 };
+        purchases.forEach(p => {
+            if (!p.planId) return;
+            const plan = installmentPlans.find(pl => pl.id === p.planId && pl.status === 'active');
+            if (!plan) return;
+            purchased[p.metal] = (purchased[p.metal] || 0) + (p.weight || 0);
         });
         return {
-            Gold: { owed: owed.Gold, hedged: hedged.Gold || 0, toBuy: Math.max(0, owed.Gold - (hedged.Gold || 0)) },
-            Silver: { owed: owed.Silver, hedged: hedged.Silver || 0, toBuy: Math.max(0, owed.Silver - (hedged.Silver || 0)) },
+            Gold: { owed: owed.Gold, hedged: purchased.Gold || 0, toBuy: Math.max(0, owed.Gold - (purchased.Gold || 0)) },
+            Silver: { owed: owed.Silver, hedged: purchased.Silver || 0, toBuy: Math.max(0, owed.Silver - (purchased.Silver || 0)) },
             unresolvedPlans
         };
     }
 
     function computeSalesTrackSummary(track){
         const owed = getSalesTrackGrams(track);
-        const hedged = getHedgedGramsSinceForTrack(track);
+        const purchased = getPurchasedForTrack(track);
         return {
-            Gold: { owed: owed.Gold || 0, hedged: hedged.Gold || 0, toBuy: Math.max(0, (owed.Gold || 0) - (hedged.Gold || 0)) },
-            Silver: { owed: owed.Silver || 0, hedged: hedged.Silver || 0, toBuy: Math.max(0, (owed.Silver || 0) - (hedged.Silver || 0)) }
+            Gold: { owed: owed.Gold || 0, hedged: purchased.Gold || 0, toBuy: Math.max(0, (owed.Gold || 0) - (purchased.Gold || 0)) },
+            Silver: { owed: owed.Silver || 0, hedged: purchased.Silver || 0, toBuy: Math.max(0, (owed.Silver || 0) - (purchased.Silver || 0)) }
         };
     }
 
-    function computeCombinedAvgRate(metal){
+function computeCombinedAvgRate(metal){
         let totalGrams = 0, weightedSum = 0;
         installmentPlans.filter(p => p.status === 'active').forEach(plan => {
             const g = getPlanHedgeGrams(plan);
@@ -696,137 +785,81 @@
         return totalWeight > 0 ? weightedSum / totalWeight : 0;
     }
 
-    function computeHedgePnl(){
+        // Rewritten for Purchase/Payment: a PAID purchase compares its own
+    // rate against the booked rate directly. A CREDIT purchase has no
+    // rate of its own — its Payments do, so P&L looks at Payments
+    // instead. Plan-linked purchases are always paid immediately (see
+    // getPartyCreditBalance's comment), so Payments are only ever
+    // against general (non-plan) credit — bookedRateFor(track, null, ...)
+    // is correct for every payment without needing a planId on Payment.
+    function computePnl(){
         let totalPnl = 0;
         const rows = [];
         const salesRateCache = {};
-        hedgeLog.forEach(e => {
-            if (!e.planId) return;
-            let bookedRate = 0, label = '';
-            if (e.planId === SALES_HEDGE_BUCKET.A || e.planId === SALES_HEDGE_BUCKET.B) {
-                // Sales entries belonging to the OTHER (inactive) track are
-                // excluded entirely — everywhere else on this screen (the
-                // summary cards, the Sales section) already scopes to
-                // currentInvTrack, so P&L mixing in both tracks' entries
-                // would be the one inconsistent view on the page.
-                if (e.planId !== SALES_HEDGE_BUCKET[currentInvTrack]) return;
-                const track = currentInvTrack;
-                const cacheKey = track + '|' + e.metal;
-                if (!(cacheKey in salesRateCache)) salesRateCache[cacheKey] = getSalesTrackWeightedRate(track, e.metal);
-                bookedRate = salesRateCache[cacheKey];
-                label = `Track ${track} Sales`;
-            } else {
-                const plan = installmentPlans.find(p => p.id === e.planId);
-                if (!plan) return;
-                bookedRate = _getAppliedPureRate(plan, e.metal);
-                label = plan.customerName;
+        function bookedRateFor(track, planId, metal){
+            if (planId) {
+                const plan = installmentPlans.find(pl => pl.id === planId);
+                if (!plan) return null;
+                const r = _getAppliedPureRate(plan, metal);
+                return r ? { rate: r, label: plan.customerName } : null;
             }
-            if (!bookedRate) return;
+            if (track !== currentInvTrack) return null;
+            const key = track + '|' + metal;
+            if (!(key in salesRateCache)) salesRateCache[key] = getSalesTrackWeightedRate(track, metal);
+            const r = salesRateCache[key];
+            return r ? { rate: r, label: `Track ${track}` } : null;
+        }
 
-            if (e.isCredit) {
-                // Each settlement is its own purchase event at its own
-                // rate and date — compare each individually against the
-                // same booked rate, rather than treating the credit entry
-                // as one purchase (the settlements are the purchases).
-                (e.settlements || []).forEach(s => {
-                    if (!s.rate) return; // metal-settled portion, nothing to compare
-                    const pnl = (bookedRate - s.rate) * (s.grams || 0);
-                    totalPnl += pnl;
-                    rows.push({ customerName: label + ' (credit)', metal: e.metal, grams: s.grams, rate: s.rate, bookedRate, pnl });
-                });
-                return;
-            }
-
-            if (!e.rate) return;
-            const pnl = (bookedRate - e.rate) * (e.grams || 0);
+        purchases.forEach(p => {
+            if (p.status !== 'paid' || !p.rate) return;
+            const booked = bookedRateFor(p.track, p.planId, p.metal);
+            if (!booked) return;
+            const pnl = (booked.rate - p.rate) * (p.weight || 0);
             totalPnl += pnl;
-            rows.push({ customerName: label, metal: e.metal, grams: e.grams, rate: e.rate, bookedRate, pnl });
+            rows.push({ label: `${getPartyName(p.partyId)} — ${booked.label}`, metal: p.metal, weight: p.weight, rate: p.rate, bookedRate: booked.rate, pnl });
+        });
+        payments.forEach(pay => {
+            if (!pay.rate) return;
+            const booked = bookedRateFor(pay.track, null, pay.metal);
+            if (!booked) return;
+            const pnl = (booked.rate - pay.rate) * (pay.weight || 0);
+            totalPnl += pnl;
+            rows.push({ label: `${getPartyName(pay.partyId)} — ${booked.label} (credit)`, metal: pay.metal, weight: pay.weight, rate: pay.rate, bookedRate: booked.rate, pnl });
         });
         return { totalPnl, rows };
     }
 
+
     // ── Expand/collapse state ──
     let _hedgeExpandedPlans = new Set();
-    function _toggleHedgePlanEntries(planId){
-        if (_hedgeExpandedPlans.has(planId)) _hedgeExpandedPlans.delete(planId);
-        else _hedgeExpandedPlans.add(planId);
-        renderHedgeDashboard();
+    function _toggleHedgePlanEntries(key){
+        if (_hedgeExpandedPlans.has(key)) _hedgeExpandedPlans.delete(key);
+        else _hedgeExpandedPlans.add(key);
+        renderPurchaseTab();
     }
     let _hedgeSettledExpanded = false;
     function _toggleHedgeSettled(){
         _hedgeSettledExpanded = !_hedgeSettledExpanded;
-        renderHedgeDashboard();
+        renderPurchaseTab();
     }
 
-    function _hedgeEntryRow(e){
-        if (e.isCredit) return _creditEntryRow(e);
+    function _purchaseRow(p){
+        const partyName = getPartyName(p.partyId);
         return `
-            <div style="display:flex; justify-content:space-between; align-items:center; background:var(--surface); border-radius:var(--radius); padding:10px 14px; margin-bottom:8px; box-shadow:0 1px 6px rgba(0,0,0,.06);">
+            <div style="display:flex; justify-content:space-between; align-items:center; background:var(--surface); border-radius:var(--radius); padding:10px 14px; margin-bottom:8px; box-shadow:0 1px 6px rgba(0,0,0,.06); ${p.status === 'credit' ? 'border-left:3px solid #FB8C00;' : ''}">
                 <div style="font-size:12.5px;">
-                    <b>${e.metal}</b> · ${(e.grams || 0).toFixed(2)}g ${e.rate ? `@ ₹${e.rate.toFixed(2)}/g` : ''}
-                    <div style="font-size:10.5px; color:var(--text2);">${e.date || ''}${e.note ? ' · ' + e.note.replace(/</g, '&lt;') : ''}</div>
+                    <b>${partyName}</b> · ${p.metal} · ${(p.weight || 0).toFixed(2)}g ${p.status === 'paid' ? `@ ₹${(p.rate || 0).toFixed(2)}/g` : '<span style="color:#FB8C00;">(credit)</span>'}
+                    <div style="font-size:10.5px; color:var(--text2);">${p.date || ''}${p.note ? ' · ' + p.note.replace(/</g, '&lt;') : ''}</div>
                 </div>
                 <div style="display:flex; align-items:center; gap:8px;">
-                    <button onclick="openHedgeLogModal(null, '${e.id}')" title="Edit" style="background:none; border:1.5px solid var(--border); color:var(--text); font-weight:700; padding:5px 10px; border-radius:8px; font-size:11px; width:auto; margin:0;">Edit</button>
-                    <button onclick="deleteHedgeLogEntry('${e.id}')" title="Remove" style="background:none; border:none; color:#C62828; font-size:16px; padding:0; width:auto; box-shadow:none; margin:0;">✕</button>
+                    <button onclick="openPurchaseModal(null, '${p.id}')" title="Edit" style="background:none; border:1.5px solid var(--border); color:var(--text); font-weight:700; padding:5px 10px; border-radius:8px; font-size:11px; width:auto; margin:0;">Edit</button>
+                    <button onclick="deletePurchase('${p.id}')" title="Remove" style="background:none; border:none; color:#C62828; font-size:16px; padding:0; width:auto; box-shadow:none; margin:0;">✕</button>
                 </div>
             </div>`;
     }
 
-    // Credit purchase: e.grams is the immutable original amount received —
-    // that's what counts toward Hedged (see getHedgedGrams /
-    // getHedgedGramsSinceForTrack, unchanged for this exact reason). The
-    // settlements[] array is a purely financial record of how/when it got
-    // paid for, layered on top without affecting the hedge count itself.
-    function _creditGroupState(e){
-        const settlements = e.settlements || [];
-        const settledGrams = settlements.reduce((s, x) => s + (x.grams || 0), 0);
-        const pendingGrams = Math.max(0, (e.grams || 0) - settledGrams);
-        return { settlements, settledGrams, pendingGrams };
-    }
-
-    function _creditEntryRow(e){
-        const { settlements, settledGrams, pendingGrams } = _creditGroupState(e);
-        const expanded = _hedgeExpandedPlans.has('credit_' + e.id);
-        return `
-            <div style="background:var(--surface); border-radius:var(--radius); padding:10px 14px; margin-bottom:8px; box-shadow:0 1px 6px rgba(0,0,0,.06); border-left:3px solid #FB8C00;">
-                <div style="display:flex; justify-content:space-between; align-items:flex-start;">
-                    <div style="font-size:12.5px;">
-                        <b>${e.metal}</b> · ${(e.grams || 0).toFixed(2)}g credit
-                        <div style="font-size:10.5px; color:var(--text2);">${e.date || ''}${e.note ? ' · ' + e.note.replace(/</g, '&lt;') : ''}</div>
-                        <div style="font-size:11px; margin-top:4px; color:${pendingGrams > 0 ? '#FB8C00' : '#2E7D32'};">
-                            ${pendingGrams > 0 ? `Settled ${settledGrams.toFixed(2)}g of ${e.grams.toFixed(2)}g — ${pendingGrams.toFixed(2)}g pending` : `✓ Fully settled (${settledGrams.toFixed(2)}g)`}
-                        </div>
-                    </div>
-                    <div style="display:flex; align-items:center; gap:6px;">
-                        <button onclick="openHedgeLogModal(null, '${e.id}')" title="Edit original entry" style="background:none; border:1.5px solid var(--border); color:var(--text); font-weight:700; padding:5px 8px; border-radius:8px; font-size:11px; width:auto; margin:0;">Edit</button>
-                        <button onclick="deleteHedgeLogEntry('${e.id}')" title="Remove" style="background:none; border:none; color:#C62828; font-size:16px; padding:0; width:auto; box-shadow:none; margin:0;">✕</button>
-                    </div>
-                </div>
-                <div style="display:flex; justify-content:space-between; align-items:center; margin-top:8px; padding-top:8px; border-top:1px solid var(--border);">
-                    ${settlements.length ? `
-                        <span onclick="_toggleHedgePlanEntries('credit_${e.id}')" style="font-size:11px; font-weight:700; color:var(--text2); cursor:pointer; user-select:none;">
-                            ${expanded ? '▾' : '▸'} ${settlements.length} settlement${settlements.length === 1 ? '' : 's'}
-                        </span>` : `<span style="font-size:11px; color:var(--text2);">No settlements yet</span>`}
-                    ${pendingGrams > 0 ? `<button onclick="openSettlePartialModal('${e.id}')" style="background:none; border:1.5px solid var(--border); color:var(--text); font-weight:700; padding:5px 10px; border-radius:8px; font-size:11px; width:auto; margin:0;">+ Settle Partial</button>` : ''}
-                </div>
-                ${(expanded && settlements.length) ? `<div style="margin-top:8px;">${settlements.map(s => `
-                    <div style="display:flex; justify-content:space-between; align-items:center; background:var(--bg); border-radius:var(--radius); padding:8px 12px; margin-bottom:6px;">
-                        <div style="font-size:11.5px;">
-                            ${(s.grams || 0).toFixed(2)}g ${s.rate ? `@ ₹${s.rate.toFixed(2)}/g` : '(metal)'}
-                            <div style="font-size:10px; color:var(--text2);">${s.date || ''}${s.note ? ' · ' + s.note.replace(/</g, '&lt;') : ''}</div>
-                        </div>
-                        <div style="display:flex; align-items:center; gap:6px;">
-                            <button onclick="openSettlePartialModal('${e.id}', '${s.id}')" title="Edit" style="background:none; border:1.5px solid var(--border); color:var(--text); font-weight:700; padding:4px 8px; border-radius:8px; font-size:10.5px; width:auto; margin:0;">Edit</button>
-                            <button onclick="deleteSettlement('${e.id}', '${s.id}')" title="Remove" style="background:none; border:none; color:#C62828; font-size:14px; padding:0; width:auto; box-shadow:none; margin:0;">✕</button>
-                        </div>
-                    </div>
-                `).join('')}</div>` : ''}
-            </div>`;
-    }
-
-    // ── Main render ──
-    function renderHedgeDashboard(){
+    // ── Main Purchase tab render ──
+    function renderPurchaseTab(){
         const dateFieldEl = document.getElementById('hedge-sales-start-date');
         if (dateFieldEl && document.activeElement !== dateFieldEl) {
             dateFieldEl.value = getSalesHedgeStartDate(currentInvTrack).toISOString().slice(0, 10);
@@ -850,14 +883,14 @@
             <div style="background:var(--surface); border-radius:var(--radius); padding:14px; box-shadow:0 1px 6px rgba(0,0,0,.06);">
                 <div style="font-size:10px; font-weight:700; letter-spacing:.08em; color:var(--text2); text-transform:uppercase; margin-bottom:8px;">${icon} ${label}</div>
                 <div style="font-size:11px; color:var(--text2); margin-bottom:2px;">Owed: <b style="color:var(--text);">${s.owed.toFixed(2)}g</b></div>
-                <div style="font-size:11px; color:var(--text2); margin-bottom:8px;">Hedged: <b style="color:var(--text);">${s.hedged.toFixed(2)}g</b></div>
+                <div style="font-size:11px; color:var(--text2); margin-bottom:8px;">Purchased: <b style="color:var(--text);">${s.hedged.toFixed(2)}g</b></div>
                 <div style="font-size:20px; font-weight:800; color:${s.toBuy > 0 ? '#C62828' : '#2E7D32'};">${s.toBuy.toFixed(2)}g</div>
                 <div style="font-size:10px; color:var(--text2); margin-bottom:${avgRate ? '6' : '0'}px;">to buy</div>
                 ${avgRate ? `<div style="font-size:10.5px; color:var(--text2); padding-top:6px; border-top:1px solid var(--border);">avg sold @ ₹${avgRate.toFixed(2)}/g</div>` : ''}
             </div>`;
         cardsEl.innerHTML = metalCard('Gold', '🟡', combined.Gold, computeCombinedAvgRate('Gold')) + metalCard('Silver', '⚪', combined.Silver, computeCombinedAvgRate('Silver'));
 
-        const pnl = computeHedgePnl();
+        const pnl = computePnl();
         const pnlEl = document.getElementById('hedge-pnl-card');
         if (!pnl.rows.length) {
             pnlEl.style.display = 'none';
@@ -867,12 +900,12 @@
             const pnlColor = pnl.totalPnl >= 0 ? '#2E7D32' : '#C62828';
             pnlEl.innerHTML = `
                 <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
-                    <div style="font-size:10px; font-weight:700; letter-spacing:.08em; color:var(--text2); text-transform:uppercase;">Hedge P&L</div>
+                    <div style="font-size:10px; font-weight:700; letter-spacing:.08em; color:var(--text2); text-transform:uppercase;">Purchase P&L</div>
                     <div style="font-size:18px; font-weight:800; color:${pnlColor};">${pnl.totalPnl >= 0 ? '+' : ''}₹${pnl.totalPnl.toFixed(2)}</div>
                 </div>
                 ${pnl.rows.map(r => `
                     <div style="display:flex; justify-content:space-between; font-size:12px; padding:4px 0; border-top:1px solid var(--border);">
-                        <span style="color:var(--text2);">${r.customerName} · ${r.metal} · ${r.grams.toFixed(2)}g<br><span style="font-size:10.5px;">Paid ₹${r.rate.toFixed(2)}/g vs booked ₹${r.bookedRate.toFixed(2)}/g</span></span>
+                        <span style="color:var(--text2);">${r.label} · ${r.metal} · ${r.weight.toFixed(2)}g<br><span style="font-size:10.5px;">Paid ₹${r.rate.toFixed(2)}/g vs booked ₹${r.bookedRate.toFixed(2)}/g</span></span>
                         <span style="font-weight:700; color:${r.pnl >= 0 ? '#2E7D32' : '#C62828'}; white-space:nowrap;">${r.pnl >= 0 ? '+' : ''}₹${r.pnl.toFixed(2)}</span>
                     </div>
                 `).join('')}`;
@@ -883,11 +916,11 @@
             .filter(p => p.status === 'active')
             .map(p => {
                 const g = getPlanHedgeGrams(p);
-                const hedged = getHedgedGrams(p.id);
+                const purchased = getPurchasedForPlan(p.id);
                 const owed = { Gold: g.totals.Gold || 0, Silver: g.totals.Silver || 0 };
                 const need = {
-                    Gold: Math.max(0, owed.Gold - (hedged.Gold || 0)),
-                    Silver: Math.max(0, owed.Silver - (hedged.Silver || 0))
+                    Gold: Math.max(0, owed.Gold - (purchased.Gold || 0)),
+                    Silver: Math.max(0, owed.Silver - (purchased.Silver || 0))
                 };
                 return { plan: p, owed, need, unresolved: g.unresolved };
             })
@@ -907,13 +940,13 @@
         };
 
         const planRow = (x, statusLine) => {
-            const entries = hedgeLog.filter(e => e.planId === x.plan.id).sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+            const entries = purchases.filter(p => p.planId === x.plan.id).sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
             const expanded = _hedgeExpandedPlans.has(x.plan.id);
             return `
             <div style="background:var(--surface); border-radius:var(--radius); padding:12px 14px; margin-bottom:8px; box-shadow:0 1px 6px rgba(0,0,0,.06);">
                 <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
                     <span style="font-weight:700;">${x.plan.customerName}</span>
-                    <button onclick="openHedgeLogModal('${x.plan.id}')" style="background:none; border:1.5px solid var(--border); color:var(--text); font-weight:700; padding:5px 10px; border-radius:8px; font-size:11.5px; width:auto; margin:0;">+ Log Hedge</button>
+                    <button onclick="openPurchaseModal('${x.plan.id}')" style="background:none; border:1.5px solid var(--border); color:var(--text); font-weight:700; padding:5px 10px; border-radius:8px; font-size:11.5px; width:auto; margin:0;">+ Purchase for Plan</button>
                 </div>
                 <div style="font-size:12.5px; color:var(--text2);">${statusLine}</div>
                 ${bookedRateLine(x)}
@@ -922,7 +955,7 @@
                     <div onclick="_toggleHedgePlanEntries('${x.plan.id}')" style="margin-top:8px; padding-top:8px; border-top:1px solid var(--border); font-size:11px; font-weight:700; color:var(--text2); cursor:pointer; user-select:none;">
                         ${expanded ? '▾' : '▸'} ${entries.length} purchase${entries.length === 1 ? '' : 's'} logged
                     </div>
-                    ${expanded ? `<div style="margin-top:6px;">${entries.map(e => _hedgeEntryRow(e)).join('')}</div>` : ''}
+                    ${expanded ? `<div style="margin-top:6px;">${entries.map(p => _purchaseRow(p)).join('')}</div>` : ''}
                 ` : ''}
             </div>`;
         };
@@ -949,12 +982,12 @@
         if (settled.length) {
             html += `
                 <div onclick="_toggleHedgeSettled()" style="display:flex; justify-content:space-between; align-items:center; padding:10px 14px; margin-top:4px; cursor:pointer; user-select:none; color:var(--text2); font-size:12.5px; font-weight:700;">
-                    <span>${_hedgeSettledExpanded ? '▾' : '▸'} Already Hedged (${settled.length})</span>
+                    <span>${_hedgeSettledExpanded ? '▾' : '▸'} Already Covered (${settled.length})</span>
                 </div>
                 ${_hedgeSettledExpanded ? settled.map(x => {
                     const totalOwed = x.owed.Gold + x.owed.Silver;
                     const statusLine = totalOwed > 0
-                        ? `<span style="color:#2E7D32;">✓ Fully hedged (${totalOwed.toFixed(2)}g)</span>`
+                        ? `<span style="color:#2E7D32;">✓ Fully covered (${totalOwed.toFixed(2)}g)</span>`
                         : `<span style="color:var(--text2);">— No gold/silver items in this plan</span>`;
                     return planRow(x, statusLine);
                 }).join('') : ''}`;
@@ -962,21 +995,20 @@
         plansEl.innerHTML = html;
         document.getElementById('hedge-plans-section').style.display = evaluated.length ? '' : 'none';
 
-        // Regular sales — track-scoped, plus manual owed entries
+        // General purchases — track-scoped
         const salesTrackEl = document.getElementById('hedge-sales-track');
         if (salesTrackEl) {
             const track = currentInvTrack;
-            const bucketId = SALES_HEDGE_BUCKET[track];
             const trackStartDate = getSalesHedgeStartDate(track);
-            const salesEntries = hedgeLog
-                .filter(e => e.planId === bucketId && new Date(e.createdAt) >= trackStartDate)
+            const trackEntries = purchases
+                .filter(p => !p.planId && p.track === track && new Date(p.createdAt) >= trackStartDate)
                 .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
             const owedEntries = manualOwedLog
                 .filter(e => e.track === track && new Date(e.createdAt) >= trackStartDate)
                 .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
-            const owedExpandKey = bucketId + '_owed';
+            const owedExpandKey = 'owed_' + track;
             const owedExpanded = _hedgeExpandedPlans.has(owedExpandKey);
-            const salesExpanded = _hedgeExpandedPlans.has(bucketId);
+            const trackExpanded = _hedgeExpandedPlans.has('track_' + track);
             const need = { Gold: salesSummary.Gold.toBuy, Silver: salesSummary.Silver.toBuy };
             const totalOwed = salesSummary.Gold.owed + salesSummary.Silver.owed;
             let salesStatusLine;
@@ -986,7 +1018,7 @@
                     ${need.Gold > 0 && need.Silver > 0 ? ' · ' : ''}
                     ${need.Silver > 0 ? `⚪ Silver: <b style="color:var(--text);">${need.Silver.toFixed(2)}g</b> needed` : ''}`;
             } else if (totalOwed > 0) {
-                salesStatusLine = `<span style="color:#2E7D32;">✓ Fully hedged (${totalOwed.toFixed(2)}g)</span>`;
+                salesStatusLine = `<span style="color:#2E7D32;">✓ Fully covered (${totalOwed.toFixed(2)}g)</span>`;
             } else {
                 salesStatusLine = `<span style="color:var(--text2);">No gold/silver sold since ${trackStartDate.toLocaleDateString('en-IN')}.</span>`;
             }
@@ -1003,10 +1035,10 @@
             salesTrackEl.innerHTML = `
                 <div style="background:var(--surface); border-radius:var(--radius); padding:12px 14px; margin-bottom:8px; box-shadow:0 1px 6px rgba(0,0,0,.06);">
                     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
-                        <span style="font-weight:700;">Sales</span>
+                        <span style="font-weight:700;">Purchases</span>
                         <div style="display:flex; align-items:center; gap:6px;">
                             <button onclick="openManualOwedModal()" title="Add a durable owed entry" style="background:none; border:1.5px solid var(--border); color:var(--text2); font-weight:700; padding:5px 10px; border-radius:8px; font-size:11.5px; width:auto; margin:0;">+ Add Owed</button>
-                            <button onclick="openHedgeLogModal('${bucketId}')" style="background:none; border:1.5px solid var(--border); color:var(--text); font-weight:700; padding:5px 10px; border-radius:8px; font-size:11.5px; width:auto; margin:0;">+ Log Hedge</button>
+                            <button onclick="openPurchaseModal(null)" style="background:none; border:1.5px solid var(--border); color:var(--text); font-weight:700; padding:5px 10px; border-radius:8px; font-size:11.5px; width:auto; margin:0;">+ New Purchase</button>
                         </div>
                     </div>
                     <div style="font-size:12.5px; color:var(--text2);">${salesStatusLine}</div>
@@ -1028,262 +1060,282 @@
                             </div>
                         `).join('')}</div>` : ''}
                     ` : ''}
-                    ${salesEntries.length ? `
-                        <div onclick="_toggleHedgePlanEntries('${bucketId}')" style="margin-top:8px; padding-top:8px; border-top:1px solid var(--border); font-size:11px; font-weight:700; color:var(--text2); cursor:pointer; user-select:none;">
-                            ${salesExpanded ? '▾' : '▸'} ${salesEntries.length} purchase${salesEntries.length === 1 ? '' : 's'} logged
+                    ${trackEntries.length ? `
+                        <div onclick="_toggleHedgePlanEntries('track_${track}')" style="margin-top:8px; padding-top:8px; border-top:1px solid var(--border); font-size:11px; font-weight:700; color:var(--text2); cursor:pointer; user-select:none;">
+                            ${trackExpanded ? '▾' : '▸'} ${trackEntries.length} purchase${trackEntries.length === 1 ? '' : 's'} logged
                         </div>
-                        ${salesExpanded ? `<div style="margin-top:6px;">${salesEntries.map(e => _hedgeEntryRow(e)).join('')}</div>` : ''}
+                        ${trackExpanded ? `<div style="margin-top:6px;">${trackEntries.map(p => _purchaseRow(p)).join('')}</div>` : ''}
                     ` : ''}
                 </div>`;
         }
     }
 
-    // ── Hedge purchase modal ──
-    function onHedgeLogCreditToggle(){
-        const isCredit = document.getElementById('hedge-log-is-credit').checked;
-        document.getElementById('hedge-log-rate-field').style.display = isCredit ? 'none' : 'block';
-        document.getElementById('hedge-log-credit-note').style.display = isCredit ? 'block' : 'none';
+    // ── Purchase modal ──
+    // planId set (from a plan's "+ Purchase for Plan" button) forces
+    // paid-immediately — the whole point of a plan-specific purchase is
+    // locking in the rate right away so that particular transaction can't
+    // end up a loss; leaving it on open credit would defeat that.
+    function onPurchaseCreditToggle(){
+        const isCredit = document.getElementById('purchase-status').value === 'credit';
+        document.getElementById('purchase-rate-field').style.display = isCredit ? 'none' : 'block';
+        document.getElementById('purchase-credit-note').style.display = isCredit ? 'block' : 'none';
     }
 
-    function openHedgeLogModal(planId, entryId){
-        const editing = !!entryId;
-        const existing = editing ? hedgeLog.find(e => e.id === entryId) : null;
-        document.getElementById('hedge-log-entry-id').value = entryId || '';
-        document.getElementById('hedge-log-plan-id').value = existing ? (existing.planId || '') : (planId || '');
-        const noteEl = document.getElementById('hedge-log-plan-note');
-        const metalSelect = document.getElementById('hedge-log-metal');
+    function openPurchaseModal(planId, purchaseId){
+        const editing = !!purchaseId;
+        const existing = editing ? purchases.find(p => p.id === purchaseId) : null;
         const effectivePlanId = existing ? existing.planId : planId;
 
-        document.getElementById('hedge-log-grams').value = existing ? existing.grams : '';
-        document.getElementById('hedge-log-date').value = existing ? existing.date : new Date().toISOString().slice(0, 10);
-        document.getElementById('hedge-log-rate').value = (existing && !existing.isCredit) ? existing.rate : '';
-        document.getElementById('hedge-log-note').value = existing ? (existing.note || '') : '';
-        document.getElementById('hedge-log-title').textContent = editing ? 'Edit Hedge Purchase' : (effectivePlanId ? 'Log Hedge Purchase' : 'Log Purchase');
+        document.getElementById('purchase-id').value = purchaseId || '';
+        document.getElementById('purchase-plan-id').value = effectivePlanId || '';
 
-        // Credit toggle: only offered when creating a new entry — a
-        // simple entry can't be converted to credit (or back) after the
-        // fact, since that would mean fabricating a settlements history
-        // that never happened.
-        const creditRow = document.getElementById('hedge-log-credit-row');
-        const isCreditCheckbox = document.getElementById('hedge-log-is-credit');
-        if (editing) {
-            creditRow.style.display = 'none';
-            isCreditCheckbox.checked = !!(existing && existing.isCredit);
+        const partySelect = document.getElementById('purchase-party');
+        partySelect.innerHTML = parties.map(p => `<option value="${p.id}">${p.name.replace(/</g, '&lt;')}</option>`).join('') + `<option value="__new__">+ New Party…</option>`;
+        if (existing) partySelect.value = existing.partyId;
+
+        document.getElementById('purchase-metal').value = existing ? existing.metal : 'Gold';
+        document.getElementById('purchase-weight').value = existing ? existing.weight : '';
+        document.getElementById('purchase-date').value = existing ? existing.date : new Date().toISOString().slice(0, 10);
+        document.getElementById('purchase-rate').value = (existing && existing.status === 'paid') ? existing.rate : '';
+        document.getElementById('purchase-note').value = existing ? (existing.note || '') : '';
+
+        const trackRow = document.getElementById('purchase-track-row');
+        const statusRow = document.getElementById('purchase-status-row');
+        const statusSelect = document.getElementById('purchase-status');
+        if (effectivePlanId) {
+            trackRow.style.display = 'none';
+            statusRow.style.display = 'none';
+            statusSelect.value = 'paid';
         } else {
-            creditRow.style.display = 'flex';
-            isCreditCheckbox.checked = false;
+            trackRow.style.display = 'block';
+            document.getElementById('purchase-track-label').textContent = currentInvTrack;
+            statusRow.style.display = 'block';
+            statusSelect.value = existing ? existing.status : 'paid';
+            statusSelect.disabled = editing; // can't flip credit<->paid after creation, same reasoning as before
         }
-        onHedgeLogCreditToggle();
+        onPurchaseCreditToggle();
 
-        const salesTrack = effectivePlanId === SALES_HEDGE_BUCKET.A ? 'A' : (effectivePlanId === SALES_HEDGE_BUCKET.B ? 'B' : null);
-
-        if (salesTrack) {
-            noteEl.style.display = 'block';
-            noteEl.textContent = 'For regular sales';
-            if (existing) {
-                metalSelect.value = existing.metal;
-            } else {
-                const owed = getSalesTrackGrams(salesTrack);
-                const hedged = getHedgedGramsSinceForTrack(salesTrack);
-                const goldNeed = (owed.Gold || 0) - (hedged.Gold || 0);
-                const silverNeed = (owed.Silver || 0) - (hedged.Silver || 0);
-                metalSelect.value = (silverNeed > 0 && goldNeed <= 0) ? 'Silver' : 'Gold';
-            }
-        } else if (effectivePlanId) {
-            const plan = installmentPlans.find(p => p.id === effectivePlanId);
-            if (plan) {
-                noteEl.style.display = 'block';
-                noteEl.textContent = `For ${plan.customerName}'s plan`;
-                if (existing) {
-                    metalSelect.value = existing.metal;
-                } else {
-                    const g = getPlanHedgeGrams(plan);
-                    const hedged = getHedgedGrams(effectivePlanId);
-                    const goldNeed = (g.totals.Gold || 0) - (hedged.Gold || 0);
-                    const silverNeed = (g.totals.Silver || 0) - (hedged.Silver || 0);
-                    metalSelect.value = (silverNeed > 0 && goldNeed <= 0) ? 'Silver' : 'Gold';
-                }
-            } else {
-                noteEl.style.display = 'none';
-            }
-        } else {
-            noteEl.style.display = 'none';
-            metalSelect.value = existing ? existing.metal : 'Gold';
-        }
-
-        document.getElementById('hedge-log-save-btn').textContent = editing ? '✓ Save Changes' : '✓ Save Purchase';
-        document.getElementById('hedge-log-modal').classList.add('show');
+        document.getElementById('purchase-title').textContent = editing ? 'Edit Purchase' : (effectivePlanId ? 'Purchase for Plan' : 'New Purchase');
+        document.getElementById('purchase-modal').classList.add('show');
     }
 
-    function closeHedgeLogModal(){
-        document.getElementById('hedge-log-modal').classList.remove('show');
+    function closePurchaseModal(){
+        document.getElementById('purchase-modal').classList.remove('show');
     }
 
-    async function saveHedgeLogEntry(){
-        const entryId = document.getElementById('hedge-log-entry-id').value || null;
-        const planId = document.getElementById('hedge-log-plan-id').value || null;
-        const metal = document.getElementById('hedge-log-metal').value;
-        const grams = parseFloat(document.getElementById('hedge-log-grams').value) || 0;
-        const dateVal = document.getElementById('hedge-log-date').value;
-        const isCreditNew = document.getElementById('hedge-log-is-credit').checked; // only meaningful when creating
-        const rate = parseFloat(document.getElementById('hedge-log-rate').value) || 0;
-        const note = document.getElementById('hedge-log-note').value.trim();
-        if (grams <= 0) { showCustomAlert('Enter grams purchased.'); return; }
+    async function savePurchase(){
+        const purchaseId = document.getElementById('purchase-id').value || null;
+        const planId = document.getElementById('purchase-plan-id').value || null;
+        let partyId = document.getElementById('purchase-party').value;
+        const metal = document.getElementById('purchase-metal').value;
+        const weight = parseFloat(document.getElementById('purchase-weight').value) || 0;
+        const dateVal = document.getElementById('purchase-date').value;
+        const status = planId ? 'paid' : document.getElementById('purchase-status').value;
+        const rate = parseFloat(document.getElementById('purchase-rate').value) || 0;
+        const note = document.getElementById('purchase-note').value.trim();
+
+        if (partyId === '__new__') {
+            const name = prompt('New party name:');
+            if (!name) return;
+            partyId = await addParty(name);
+            if (!partyId) return;
+        }
+        if (!partyId) { showCustomAlert('Select a party.'); return; }
+        if (weight <= 0) { showCustomAlert('Enter weight purchased.'); return; }
         if (!dateVal) { showCustomAlert('Enter the date of purchase.'); return; }
-        // Noon, not midnight — keeps this on the intended calendar day
-        // regardless of timezone when compared against date-only cutoffs
-        // elsewhere (getSalesHedgeStartDate etc.), rather than drifting
-        // to the previous day near a UTC boundary.
+        if (status === 'paid' && !rate) { showCustomAlert('Enter the rate paid.'); return; }
+
         const createdAt = new Date(dateVal + 'T12:00:00.000Z').toISOString();
+        const track = planId ? null : currentInvTrack;
 
-        if (entryId) {
-            const existing = hedgeLog.find(e => e.id === entryId);
-            if (!existing) { closeHedgeLogModal(); return; }
-
-            if (existing.isCredit) {
-                // Only the top-level fields change — settlements[] is
-                // untouched here (edited via Settle Partial instead).
-                // grams can't drop below what's already settled, or the
-                // settlement total would exceed the credit total.
-                const { settledGrams } = _creditGroupState(existing);
-                if (grams < settledGrams) {
-                    showCustomAlert(`Can't set this below ${settledGrams.toFixed(2)}g — that much is already settled against it.`);
-                    return;
-                }
-                const updated = { ...existing, metal, grams, note: note || null, date: dateVal, createdAt };
-                try {
-                    await window.dbUpdate(window.dbRef(window.firebaseDB, 'hedgeLog'), { [entryId]: updated });
-                    Object.assign(existing, updated);
-                    closeHedgeLogModal();
-                    renderHedgeDashboard();
-                } catch (e) {
-                    console.error('[HedgeLog] update failed', e);
-                    showCustomAlert(window._writeAllowed ? 'Could not save — try again.' : 'Writes are disabled — this copy is running in read-only mode.');
-                }
-                return;
-            }
-
-            const updated = { ...existing, metal, grams, rate, note: note || null, date: dateVal, createdAt, amount: rate ? +(grams * rate).toFixed(2) : 0 };
+        if (purchaseId) {
+            const existing = purchases.find(p => p.id === purchaseId);
+            if (!existing) { closePurchaseModal(); return; }
+            const updated = { ...existing, partyId, metal, weight, date: dateVal, createdAt, note: note || null };
+            if (existing.status === 'paid') updated.rate = rate;
             try {
-                await window.dbUpdate(window.dbRef(window.firebaseDB, 'hedgeLog'), { [entryId]: updated });
+                await window.dbUpdate(window.dbRef(window.firebaseDB, 'purchases'), { [purchaseId]: updated });
                 Object.assign(existing, updated);
-                closeHedgeLogModal();
-                renderHedgeDashboard();
+                closePurchaseModal();
+                renderPurchaseTab();
             } catch (e) {
-                console.error('[HedgeLog] update failed', e);
+                console.error('[Purchases] update failed', e);
                 showCustomAlert(window._writeAllowed ? 'Could not save — try again.' : 'Writes are disabled — this copy is running in read-only mode.');
             }
             return;
         }
 
         const id = crypto.randomUUID();
-        const entry = isCreditNew
-            ? { id, planId, metal, grams, note: note || null, isCredit: true, settlements: [], date: dateVal, createdAt }
-            : { id, planId, metal, grams, rate, note: note || null, amount: rate ? +(grams * rate).toFixed(2) : 0, date: dateVal, createdAt };
+        const entry = { id, partyId, planId, track, metal, weight, date: dateVal, createdAt, status, note: note || null };
+        if (status === 'paid') entry.rate = rate;
         try {
-            await window.dbUpdate(window.dbRef(window.firebaseDB, 'hedgeLog'), { [id]: entry });
-            hedgeLog.unshift(entry);
-            closeHedgeLogModal();
-            renderHedgeDashboard();
+            await window.dbUpdate(window.dbRef(window.firebaseDB, 'purchases'), { [id]: entry });
+            purchases.unshift(entry);
+            closePurchaseModal();
+            renderPurchaseTab();
         } catch (e) {
-            console.error('[HedgeLog] save failed', e);
+            console.error('[Purchases] save failed', e);
             showCustomAlert(window._writeAllowed ? 'Could not save — try again.' : 'Writes are disabled — this copy is running in read-only mode.');
         }
     }
 
-    async function deleteHedgeLogEntry(id){
-        showCustomConfirm('Delete this hedge purchase record?', 'Confirm', async () => {
+    async function deletePurchase(id){
+        showCustomConfirm('Delete this purchase record?', 'Confirm', async () => {
             try {
-                await window.dbUpdate(window.dbRef(window.firebaseDB, 'hedgeLog'), { [id]: null });
-                hedgeLog = hedgeLog.filter(e => e.id !== id);
-                renderHedgeDashboard();
+                await window.dbUpdate(window.dbRef(window.firebaseDB, 'purchases'), { [id]: null });
+                purchases = purchases.filter(p => p.id !== id);
+                renderPurchaseTab();
             } catch (e) {
-                console.error('[HedgeLog] delete failed', e);
+                console.error('[Purchases] delete failed', e);
                 showCustomAlert(window._writeAllowed ? 'Could not delete — try again.' : 'Writes are disabled — this copy is running in read-only mode.');
             }
         });
     }
 
-    function openSettlePartialModal(entryId, settlementId){
-        const entry = hedgeLog.find(e => e.id === entryId);
-        if (!entry || !entry.isCredit) return;
-        const editing = !!settlementId;
-        const existing = editing ? (entry.settlements || []).find(s => s.id === settlementId) : null;
-        document.getElementById('settle-entry-id').value = entryId;
-        document.getElementById('settle-settlement-id').value = settlementId || '';
-        document.getElementById('settle-grams').value = existing ? existing.grams : '';
-        document.getElementById('settle-date').value = existing ? existing.date : new Date().toISOString().slice(0, 10);
-        document.getElementById('settle-rate').value = existing ? (existing.rate || '') : '';
-        document.getElementById('settle-note').value = existing ? (existing.note || '') : '';
-        document.getElementById('settle-partial-title').textContent = editing ? 'Edit Settlement' : 'Settle Partial';
-        document.getElementById('settle-save-btn').textContent = editing ? '✓ Save Changes' : '✓ Save Settlement';
+    // ── Payment tab ──
+    function renderPaymentTab(){
+        const track = currentInvTrack;
+        const listEl = document.getElementById('payment-party-list');
+        const historyEl = document.getElementById('payment-history-list');
+        if (!listEl) return;
 
-        const { pendingGrams } = _creditGroupState(entry);
-        // Editing an existing settlement gets its own grams added back
-        // into "available" — otherwise you couldn't even re-save its
-        // current value unchanged.
-        const available = editing ? pendingGrams + (existing.grams || 0) : pendingGrams;
-        document.getElementById('settle-remaining-note').textContent = `${entry.grams.toFixed(2)}g total credit purchase — ${available.toFixed(2)}g available to settle here.`;
+        const rows = [];
+        parties.forEach(party => {
+            ['Gold', 'Silver'].forEach(metal => {
+                const bal = getPartyCreditBalance(party.id, track, metal);
+                if (bal > 0.001) rows.push({ party, metal, bal });
+            });
+        });
 
-        document.getElementById('settle-partial-modal').classList.add('show');
+        listEl.innerHTML = rows.length
+            ? rows.map(r => `
+                <div style="display:flex; justify-content:space-between; align-items:center; background:var(--surface); border-radius:var(--radius); padding:12px 14px; margin-bottom:8px; box-shadow:0 1px 6px rgba(0,0,0,.06);">
+                    <div style="font-size:13px;">
+                        <b>${r.party.name.replace(/</g, '&lt;')}</b>
+                        <div style="font-size:11.5px; color:#FB8C00;">${r.metal} · ${r.bal.toFixed(2)}g outstanding on Track ${track}</div>
+                    </div>
+                    <button onclick="openPaymentModal('${r.party.id}', '${r.metal}')" style="background:none; border:1.5px solid var(--border); color:var(--text); font-weight:700; padding:6px 12px; border-radius:8px; font-size:12px; width:auto; margin:0;">+ Pay</button>
+                </div>`).join('')
+            : `<p class="note" style="text-align:center; margin-top:10px;">No outstanding credit on Track ${track}.</p>`;
+
+        const trackStartDate = getSalesHedgeStartDate(track);
+        const history = payments.filter(pay => pay.track === track && new Date(pay.createdAt) >= trackStartDate)
+            .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+        historyEl.innerHTML = history.length
+            ? history.map(pay => `
+                <div style="display:flex; justify-content:space-between; align-items:center; background:var(--surface); border-radius:var(--radius); padding:10px 14px; margin-bottom:8px; box-shadow:0 1px 6px rgba(0,0,0,.06);">
+                    <div style="font-size:12.5px;">
+                        <b>${getPartyName(pay.partyId).replace(/</g, '&lt;')}</b> · ${pay.metal} · ${(pay.weight || 0).toFixed(2)}g ${pay.rate ? `@ ₹${pay.rate.toFixed(2)}/g` : '(metal)'}
+                        <div style="font-size:10.5px; color:var(--text2);">${pay.date || ''}${pay.note ? ' · ' + pay.note.replace(/</g, '&lt;') : ''}</div>
+                    </div>
+                    <div style="display:flex; align-items:center; gap:8px;">
+                        <button onclick="openPaymentEditModal('${pay.id}')" title="Edit" style="background:none; border:1.5px solid var(--border); color:var(--text); font-weight:700; padding:5px 10px; border-radius:8px; font-size:11px; width:auto; margin:0;">Edit</button>
+                        <button onclick="deletePayment('${pay.id}')" title="Remove" style="background:none; border:none; color:#C62828; font-size:16px; padding:0; width:auto; box-shadow:none; margin:0;">✕</button>
+                    </div>
+                </div>`).join('')
+            : `<p class="note" style="text-align:center; margin-top:10px;">No payments logged yet.</p>`;
     }
 
-    function closeSettlePartialModal(){
-        document.getElementById('settle-partial-modal').classList.remove('show');
+    function openPaymentModal(partyId, metal){
+        document.getElementById('payment-id').value = '';
+        const partySelect = document.getElementById('payment-party');
+        partySelect.innerHTML = parties.map(p => `<option value="${p.id}">${p.name.replace(/</g, '&lt;')}</option>`).join('');
+        partySelect.value = partyId;
+        partySelect.disabled = true; // party+metal identify which credit pool this reduces — fixed once opened from that pool's own Pay button
+        document.getElementById('payment-metal').value = metal;
+        document.getElementById('payment-metal').disabled = true;
+        document.getElementById('payment-weight').value = '';
+        document.getElementById('payment-date').value = new Date().toISOString().slice(0, 10);
+        document.getElementById('payment-rate').value = '';
+        document.getElementById('payment-note').value = '';
+        const bal = getPartyCreditBalance(partyId, currentInvTrack, metal);
+        document.getElementById('payment-balance-note').textContent = `${bal.toFixed(2)}g outstanding for ${getPartyName(partyId)} (${metal}, Track ${currentInvTrack}).`;
+        document.getElementById('payment-title').textContent = 'New Payment';
+        document.getElementById('payment-save-btn').textContent = '✓ Save Payment';
+        document.getElementById('payment-modal').classList.add('show');
     }
 
-    async function saveSettlement(){
-        const entryId = document.getElementById('settle-entry-id').value;
-        const settlementId = document.getElementById('settle-settlement-id').value || null;
-        const entry = hedgeLog.find(e => e.id === entryId);
-        if (!entry || !entry.isCredit) { closeSettlePartialModal(); return; }
+    function openPaymentEditModal(paymentId){
+        const pay = payments.find(x => x.id === paymentId);
+        if (!pay) return;
+        document.getElementById('payment-id').value = paymentId;
+        const partySelect = document.getElementById('payment-party');
+        partySelect.innerHTML = parties.map(p => `<option value="${p.id}">${p.name.replace(/</g, '&lt;')}</option>`).join('');
+        partySelect.value = pay.partyId;
+        partySelect.disabled = true;
+        document.getElementById('payment-metal').value = pay.metal;
+        document.getElementById('payment-metal').disabled = true;
+        document.getElementById('payment-weight').value = pay.weight;
+        document.getElementById('payment-date').value = pay.date;
+        document.getElementById('payment-rate').value = pay.rate || '';
+        document.getElementById('payment-note').value = pay.note || '';
+        const bal = getPartyCreditBalance(pay.partyId, pay.track, pay.metal) + (pay.weight || 0);
+        document.getElementById('payment-balance-note').textContent = `${bal.toFixed(2)}g available here (including this payment's own current amount).`;
+        document.getElementById('payment-title').textContent = 'Edit Payment';
+        document.getElementById('payment-save-btn').textContent = '✓ Save Changes';
+        document.getElementById('payment-modal').classList.add('show');
+    }
 
-        const grams = parseFloat(document.getElementById('settle-grams').value) || 0;
-        const dateVal = document.getElementById('settle-date').value;
-        const rate = parseFloat(document.getElementById('settle-rate').value) || 0;
-        const note = document.getElementById('settle-note').value.trim();
-        if (grams <= 0) { showCustomAlert('Enter grams settled.'); return; }
-        if (!dateVal) { showCustomAlert('Enter the settlement date.'); return; }
+    function closePaymentModal(){
+        document.getElementById('payment-modal').classList.remove('show');
+    }
 
-        const settlements = entry.settlements || [];
-        const existingSettlement = settlementId ? settlements.find(s => s.id === settlementId) : null;
-        const { settledGrams } = _creditGroupState(entry);
-        const otherSettledGrams = settledGrams - (existingSettlement ? (existingSettlement.grams || 0) : 0);
-        if (otherSettledGrams + grams > entry.grams + 0.001) { // small epsilon for float safety
-            showCustomAlert(`That's more than the ${(entry.grams - otherSettledGrams).toFixed(2)}g still available on this credit purchase.`);
+    async function savePayment(){
+        const paymentId = document.getElementById('payment-id').value || null;
+        const partyId = document.getElementById('payment-party').value;
+        const metal = document.getElementById('payment-metal').value;
+        const weight = parseFloat(document.getElementById('payment-weight').value) || 0;
+        const dateVal = document.getElementById('payment-date').value;
+        const rate = parseFloat(document.getElementById('payment-rate').value) || 0;
+        const note = document.getElementById('payment-note').value.trim();
+        if (weight <= 0) { showCustomAlert('Enter weight paid.'); return; }
+        if (!dateVal) { showCustomAlert('Enter the payment date.'); return; }
+
+        const existing = paymentId ? payments.find(p => p.id === paymentId) : null;
+        const track = existing ? existing.track : currentInvTrack;
+        const available = getPartyCreditBalance(partyId, track, metal) + (existing ? (existing.weight || 0) : 0);
+        if (weight > available + 0.001) {
+            showCustomAlert(`That's more than the ${available.toFixed(2)}g still outstanding.`);
             return;
         }
 
         const createdAt = new Date(dateVal + 'T12:00:00.000Z').toISOString();
-        let newSettlements;
-        if (existingSettlement) {
-            newSettlements = settlements.map(s => s.id === settlementId ? { ...s, grams, rate, note: note || null, date: dateVal, createdAt } : s);
-        } else {
-            newSettlements = [...settlements, { id: crypto.randomUUID(), grams, rate, note: note || null, date: dateVal, createdAt }];
+
+        if (paymentId) {
+            const updated = { ...existing, weight, date: dateVal, createdAt, rate, note: note || null };
+            try {
+                await window.dbUpdate(window.dbRef(window.firebaseDB, 'payments'), { [paymentId]: updated });
+                Object.assign(existing, updated);
+                closePaymentModal();
+                renderPaymentTab();
+            } catch (e) {
+                console.error('[Payments] update failed', e);
+                showCustomAlert(window._writeAllowed ? 'Could not save — try again.' : 'Writes are disabled — this copy is running in read-only mode.');
+            }
+            return;
         }
 
+        const id = crypto.randomUUID();
+        const entry = { id, partyId, track, metal, weight, rate, note: note || null, date: dateVal, createdAt };
         try {
-            await window.dbUpdate(window.dbRef(window.firebaseDB, 'hedgeLog'), { [entryId + '/settlements']: newSettlements });
-            entry.settlements = newSettlements;
-            closeSettlePartialModal();
-            renderHedgeDashboard();
+            await window.dbUpdate(window.dbRef(window.firebaseDB, 'payments'), { [id]: entry });
+            payments.unshift(entry);
+            closePaymentModal();
+            renderPaymentTab();
         } catch (e) {
-            console.error('[HedgeLog] settlement save failed', e);
+            console.error('[Payments] save failed', e);
             showCustomAlert(window._writeAllowed ? 'Could not save — try again.' : 'Writes are disabled — this copy is running in read-only mode.');
         }
     }
 
-    async function deleteSettlement(entryId, settlementId){
-        showCustomConfirm('Delete this settlement? The grams return to pending.', 'Confirm', async () => {
-            const entry = hedgeLog.find(e => e.id === entryId);
-            if (!entry) return;
-            const newSettlements = (entry.settlements || []).filter(s => s.id !== settlementId);
+    async function deletePayment(id){
+        showCustomConfirm('Delete this payment? The weight returns to outstanding credit.', 'Confirm', async () => {
             try {
-                await window.dbUpdate(window.dbRef(window.firebaseDB, 'hedgeLog'), { [entryId + '/settlements']: newSettlements });
-                entry.settlements = newSettlements;
-                renderHedgeDashboard();
+                await window.dbUpdate(window.dbRef(window.firebaseDB, 'payments'), { [id]: null });
+                payments = payments.filter(p => p.id !== id);
+                renderPaymentTab();
             } catch (e) {
-                console.error('[HedgeLog] settlement delete failed', e);
+                console.error('[Payments] delete failed', e);
                 showCustomAlert(window._writeAllowed ? 'Could not delete — try again.' : 'Writes are disabled — this copy is running in read-only mode.');
             }
         });
@@ -1321,7 +1373,7 @@
                 await window.dbUpdate(window.dbRef(window.firebaseDB, 'manualOwedLog'), { [entryId]: updated });
                 Object.assign(existing, updated);
                 closeManualOwedModal();
-                renderHedgeDashboard();
+                renderPurchaseTab();
             } catch (e) {
                 console.error('[ManualOwedLog] update failed', e);
                 showCustomAlert(window._writeAllowed ? 'Could not save — try again.' : 'Writes are disabled — this copy is running in read-only mode.');
@@ -1339,7 +1391,7 @@
             await window.dbUpdate(window.dbRef(window.firebaseDB, 'manualOwedLog'), { [id]: entry });
             manualOwedLog.unshift(entry);
             closeManualOwedModal();
-            renderHedgeDashboard();
+            renderPurchaseTab();
         } catch (e) {
             console.error('[ManualOwedLog] save failed', e);
             showCustomAlert(window._writeAllowed ? 'Could not save — try again.' : 'Writes are disabled — this copy is running in read-only mode.');
@@ -1351,7 +1403,7 @@
             try {
                 await window.dbUpdate(window.dbRef(window.firebaseDB, 'manualOwedLog'), { [id]: null });
                 manualOwedLog = manualOwedLog.filter(e => e.id !== id);
-                renderHedgeDashboard();
+                renderPurchaseTab();
             } catch (e) {
                 console.error('[ManualOwedLog] delete failed', e);
                 showCustomAlert(window._writeAllowed ? 'Could not delete — try again.' : 'Writes are disabled — this copy is running in read-only mode.');
@@ -1365,10 +1417,13 @@
         _pmActiveTab = name;
         document.getElementById('pm-pane-sales').style.display = name === 'sales' ? '' : 'none';
         document.getElementById('pm-pane-purchase').style.display = name === 'purchase' ? '' : 'none';
+        document.getElementById('pm-pane-payment').style.display = name === 'payment' ? '' : 'none';
         document.getElementById('pm-tab-sales').style.color = name === 'sales' ? 'var(--gold)' : 'var(--text2)';
         document.getElementById('pm-tab-purchase').style.color = name === 'purchase' ? 'var(--gold)' : 'var(--text2)';
+        document.getElementById('pm-tab-payment').style.color = name === 'payment' ? 'var(--gold)' : 'var(--text2)';
         if (name === 'sales') invInitReportDates();
-        if (name === 'purchase') renderHedgeDashboard();
+        if (name === 'purchase') renderPurchaseTab();
+        if (name === 'payment') renderPaymentTab();
     }
 
     // ── Sales Report (ported from POS.html's Invoice > Report tab) ──
