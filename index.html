@@ -137,13 +137,13 @@
         }
         #pm-content { flex: 1; overflow-y: auto; padding: 14px; max-width: 600px; margin: 0 auto; width: 100%; box-sizing: border-box; }
 
-        #hedge-log-modal, #manual-owed-modal, #pm-alert-modal {
+        #hedge-log-modal, #manual-owed-modal, #pm-alert-modal, #settle-partial-modal {
             display: none; position: fixed; inset: 0;
             background: rgba(0,0,0,0.55); z-index: 1150;
             align-items: flex-end; justify-content: center;
         }
-        #hedge-log-modal.show, #manual-owed-modal.show, #pm-alert-modal.show { display: flex; }
-        #hedge-log-panel, #manual-owed-panel, #pm-alert-panel {
+        #hedge-log-modal.show, #manual-owed-modal.show, #pm-alert-modal.show, #settle-partial-modal.show { display: flex; }
+        #hedge-log-panel, #manual-owed-panel, #pm-alert-panel, #settle-partial-panel {
             background: white; border-radius: 20px 20px 0 0;
             width: 100%; max-width: 480px;
             padding: 22px 20px 30px;
@@ -253,9 +253,17 @@
         <input type="date" id="hedge-log-date"
                style="padding:10px 12px; border:1.5px solid #e0e0e0; border-radius:10px; width:100%; font-size:14px; margin-bottom:14px; box-sizing:border-box;">
 
-        <label style="font-size:12px; font-weight:700; color:#888; margin:0 0 4px 0;">RATE PAID (₹/gram)</label>
-        <input type="number" id="hedge-log-rate" placeholder="e.g. 6250 — leave blank for a barter/melt exchange" step="0.01" min="0"
-               style="padding:10px 12px; border:1.5px solid #e0e0e0; border-radius:10px; width:100%; font-size:14px; margin-bottom:14px; box-sizing:border-box;">
+        <label id="hedge-log-credit-row" style="display:flex; align-items:center; gap:8px; margin-bottom:14px; cursor:pointer;">
+            <input type="checkbox" id="hedge-log-is-credit" onchange="onHedgeLogCreditToggle()" style="width:auto; margin:0;">
+            <span style="font-size:13px; color:#555;">Credit purchase — settle later, in one or more portions</span>
+        </label>
+
+        <div id="hedge-log-rate-field">
+            <label style="font-size:12px; font-weight:700; color:#888; margin:0 0 4px 0;">RATE PAID (₹/gram)</label>
+            <input type="number" id="hedge-log-rate" placeholder="e.g. 6250 — leave blank for a barter/melt exchange" step="0.01" min="0"
+                   style="padding:10px 12px; border:1.5px solid #e0e0e0; border-radius:10px; width:100%; font-size:14px; margin-bottom:14px; box-sizing:border-box;">
+        </div>
+        <p class="note" id="hedge-log-credit-note" style="display:none; margin:0 0 14px;">Credit purchases have no upfront rate — you'll settle each portion (cash or metal) separately as it's paid, each at its own date and rate.</p>
 
         <label style="font-size:12px; font-weight:700; color:#888; margin:0 0 4px 0;">NOTE (OPTIONAL)</label>
         <input type="text" id="hedge-log-note" placeholder="e.g. Melt exchange, Cash purchase…"
@@ -264,6 +272,39 @@
         <button onclick="saveHedgeLogEntry()" id="hedge-log-save-btn"
             style="width:100%; padding:14px; background:var(--gold); color:white; border:none; border-radius:12px; font-size:16px; font-weight:800;">
             ✓ Save Purchase
+        </button>
+    </div>
+</div>
+
+<div id="settle-partial-modal">
+    <div id="settle-partial-panel">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
+            <h3 id="settle-partial-title" style="margin:0; font-size:18px; color:#1a1a1a;">Settle Partial</h3>
+            <button onclick="closeSettlePartialModal()" style="background:none; border:none; font-size:22px; color:#aaa; padding:0; width:auto; box-shadow:none; margin:0;">✕</button>
+        </div>
+        <input type="hidden" id="settle-entry-id" value="">
+        <input type="hidden" id="settle-settlement-id" value="">
+        <p class="note" id="settle-remaining-note" style="margin-bottom:14px;"></p>
+
+        <label style="font-size:12px; font-weight:700; color:#888; margin:0 0 4px 0;">GRAMS SETTLED</label>
+        <input type="number" id="settle-grams" placeholder="e.g. 3" step="0.01" min="0"
+               style="padding:10px 12px; border:1.5px solid #e0e0e0; border-radius:10px; width:100%; font-size:14px; margin-bottom:14px; box-sizing:border-box;">
+
+        <label style="font-size:12px; font-weight:700; color:#888; margin:0 0 4px 0;">DATE SETTLED</label>
+        <input type="date" id="settle-date"
+               style="padding:10px 12px; border:1.5px solid #e0e0e0; border-radius:10px; width:100%; font-size:14px; margin-bottom:14px; box-sizing:border-box;">
+
+        <label style="font-size:12px; font-weight:700; color:#888; margin:0 0 4px 0;">RATE PAID (₹/gram)</label>
+        <input type="number" id="settle-rate" placeholder="e.g. 6250 — leave blank if settled in metal" step="0.01" min="0"
+               style="padding:10px 12px; border:1.5px solid #e0e0e0; border-radius:10px; width:100%; font-size:14px; margin-bottom:14px; box-sizing:border-box;">
+
+        <label style="font-size:12px; font-weight:700; color:#888; margin:0 0 4px 0;">NOTE (OPTIONAL)</label>
+        <input type="text" id="settle-note" placeholder="e.g. Partial 1 of 2"
+               style="padding:10px 12px; border:1.5px solid #e0e0e0; border-radius:10px; width:100%; font-size:14px; margin-bottom:16px; box-sizing:border-box;">
+
+        <button onclick="saveSettlement()" id="settle-save-btn"
+            style="width:100%; padding:14px; background:var(--gold); color:white; border:none; border-radius:12px; font-size:16px; font-weight:800;">
+            ✓ Save Settlement
         </button>
     </div>
 </div>
@@ -680,7 +721,23 @@
                 bookedRate = _getAppliedPureRate(plan, e.metal);
                 label = plan.customerName;
             }
-            if (!bookedRate || !e.rate) return;
+            if (!bookedRate) return;
+
+            if (e.isCredit) {
+                // Each settlement is its own purchase event at its own
+                // rate and date — compare each individually against the
+                // same booked rate, rather than treating the credit entry
+                // as one purchase (the settlements are the purchases).
+                (e.settlements || []).forEach(s => {
+                    if (!s.rate) return; // metal-settled portion, nothing to compare
+                    const pnl = (bookedRate - s.rate) * (s.grams || 0);
+                    totalPnl += pnl;
+                    rows.push({ customerName: label + ' (credit)', metal: e.metal, grams: s.grams, rate: s.rate, bookedRate, pnl });
+                });
+                return;
+            }
+
+            if (!e.rate) return;
             const pnl = (bookedRate - e.rate) * (e.grams || 0);
             totalPnl += pnl;
             rows.push({ customerName: label, metal: e.metal, grams: e.grams, rate: e.rate, bookedRate, pnl });
@@ -702,6 +759,7 @@
     }
 
     function _hedgeEntryRow(e){
+        if (e.isCredit) return _creditEntryRow(e);
         return `
             <div style="display:flex; justify-content:space-between; align-items:center; background:var(--surface); border-radius:var(--radius); padding:10px 14px; margin-bottom:8px; box-shadow:0 1px 6px rgba(0,0,0,.06);">
                 <div style="font-size:12.5px;">
@@ -712,6 +770,58 @@
                     <button onclick="openHedgeLogModal(null, '${e.id}')" title="Edit" style="background:none; border:1.5px solid var(--border); color:var(--text); font-weight:700; padding:5px 10px; border-radius:8px; font-size:11px; width:auto; margin:0;">Edit</button>
                     <button onclick="deleteHedgeLogEntry('${e.id}')" title="Remove" style="background:none; border:none; color:#C62828; font-size:16px; padding:0; width:auto; box-shadow:none; margin:0;">✕</button>
                 </div>
+            </div>`;
+    }
+
+    // Credit purchase: e.grams is the immutable original amount received —
+    // that's what counts toward Hedged (see getHedgedGrams /
+    // getHedgedGramsSinceForTrack, unchanged for this exact reason). The
+    // settlements[] array is a purely financial record of how/when it got
+    // paid for, layered on top without affecting the hedge count itself.
+    function _creditGroupState(e){
+        const settlements = e.settlements || [];
+        const settledGrams = settlements.reduce((s, x) => s + (x.grams || 0), 0);
+        const pendingGrams = Math.max(0, (e.grams || 0) - settledGrams);
+        return { settlements, settledGrams, pendingGrams };
+    }
+
+    function _creditEntryRow(e){
+        const { settlements, settledGrams, pendingGrams } = _creditGroupState(e);
+        const expanded = _hedgeExpandedPlans.has('credit_' + e.id);
+        return `
+            <div style="background:var(--surface); border-radius:var(--radius); padding:10px 14px; margin-bottom:8px; box-shadow:0 1px 6px rgba(0,0,0,.06); border-left:3px solid #FB8C00;">
+                <div style="display:flex; justify-content:space-between; align-items:flex-start;">
+                    <div style="font-size:12.5px;">
+                        <b>${e.metal}</b> · ${(e.grams || 0).toFixed(2)}g credit
+                        <div style="font-size:10.5px; color:var(--text2);">${e.date || ''}${e.note ? ' · ' + e.note.replace(/</g, '&lt;') : ''}</div>
+                        <div style="font-size:11px; margin-top:4px; color:${pendingGrams > 0 ? '#FB8C00' : '#2E7D32'};">
+                            ${pendingGrams > 0 ? `Settled ${settledGrams.toFixed(2)}g of ${e.grams.toFixed(2)}g — ${pendingGrams.toFixed(2)}g pending` : `✓ Fully settled (${settledGrams.toFixed(2)}g)`}
+                        </div>
+                    </div>
+                    <div style="display:flex; align-items:center; gap:6px;">
+                        <button onclick="openHedgeLogModal(null, '${e.id}')" title="Edit original entry" style="background:none; border:1.5px solid var(--border); color:var(--text); font-weight:700; padding:5px 8px; border-radius:8px; font-size:11px; width:auto; margin:0;">Edit</button>
+                        <button onclick="deleteHedgeLogEntry('${e.id}')" title="Remove" style="background:none; border:none; color:#C62828; font-size:16px; padding:0; width:auto; box-shadow:none; margin:0;">✕</button>
+                    </div>
+                </div>
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-top:8px; padding-top:8px; border-top:1px solid var(--border);">
+                    ${settlements.length ? `
+                        <span onclick="_toggleHedgePlanEntries('credit_${e.id}')" style="font-size:11px; font-weight:700; color:var(--text2); cursor:pointer; user-select:none;">
+                            ${expanded ? '▾' : '▸'} ${settlements.length} settlement${settlements.length === 1 ? '' : 's'}
+                        </span>` : `<span style="font-size:11px; color:var(--text2);">No settlements yet</span>`}
+                    ${pendingGrams > 0 ? `<button onclick="openSettlePartialModal('${e.id}')" style="background:none; border:1.5px solid var(--border); color:var(--text); font-weight:700; padding:5px 10px; border-radius:8px; font-size:11px; width:auto; margin:0;">+ Settle Partial</button>` : ''}
+                </div>
+                ${(expanded && settlements.length) ? `<div style="margin-top:8px;">${settlements.map(s => `
+                    <div style="display:flex; justify-content:space-between; align-items:center; background:var(--bg); border-radius:var(--radius); padding:8px 12px; margin-bottom:6px;">
+                        <div style="font-size:11.5px;">
+                            ${(s.grams || 0).toFixed(2)}g ${s.rate ? `@ ₹${s.rate.toFixed(2)}/g` : '(metal)'}
+                            <div style="font-size:10px; color:var(--text2);">${s.date || ''}${s.note ? ' · ' + s.note.replace(/</g, '&lt;') : ''}</div>
+                        </div>
+                        <div style="display:flex; align-items:center; gap:6px;">
+                            <button onclick="openSettlePartialModal('${e.id}', '${s.id}')" title="Edit" style="background:none; border:1.5px solid var(--border); color:var(--text); font-weight:700; padding:4px 8px; border-radius:8px; font-size:10.5px; width:auto; margin:0;">Edit</button>
+                            <button onclick="deleteSettlement('${e.id}', '${s.id}')" title="Remove" style="background:none; border:none; color:#C62828; font-size:14px; padding:0; width:auto; box-shadow:none; margin:0;">✕</button>
+                        </div>
+                    </div>
+                `).join('')}</div>` : ''}
             </div>`;
     }
 
@@ -929,6 +1039,12 @@
     }
 
     // ── Hedge purchase modal ──
+    function onHedgeLogCreditToggle(){
+        const isCredit = document.getElementById('hedge-log-is-credit').checked;
+        document.getElementById('hedge-log-rate-field').style.display = isCredit ? 'none' : 'block';
+        document.getElementById('hedge-log-credit-note').style.display = isCredit ? 'block' : 'none';
+    }
+
     function openHedgeLogModal(planId, entryId){
         const editing = !!entryId;
         const existing = editing ? hedgeLog.find(e => e.id === entryId) : null;
@@ -940,9 +1056,24 @@
 
         document.getElementById('hedge-log-grams').value = existing ? existing.grams : '';
         document.getElementById('hedge-log-date').value = existing ? existing.date : new Date().toISOString().slice(0, 10);
-        document.getElementById('hedge-log-rate').value = existing ? existing.rate : '';
+        document.getElementById('hedge-log-rate').value = (existing && !existing.isCredit) ? existing.rate : '';
         document.getElementById('hedge-log-note').value = existing ? (existing.note || '') : '';
         document.getElementById('hedge-log-title').textContent = editing ? 'Edit Hedge Purchase' : (effectivePlanId ? 'Log Hedge Purchase' : 'Log Purchase');
+
+        // Credit toggle: only offered when creating a new entry — a
+        // simple entry can't be converted to credit (or back) after the
+        // fact, since that would mean fabricating a settlements history
+        // that never happened.
+        const creditRow = document.getElementById('hedge-log-credit-row');
+        const isCreditCheckbox = document.getElementById('hedge-log-is-credit');
+        if (editing) {
+            creditRow.style.display = 'none';
+            isCreditCheckbox.checked = !!(existing && existing.isCredit);
+        } else {
+            creditRow.style.display = 'flex';
+            isCreditCheckbox.checked = false;
+        }
+        onHedgeLogCreditToggle();
 
         const salesTrack = effectivePlanId === SALES_HEDGE_BUCKET.A ? 'A' : (effectivePlanId === SALES_HEDGE_BUCKET.B ? 'B' : null);
 
@@ -994,6 +1125,7 @@
         const metal = document.getElementById('hedge-log-metal').value;
         const grams = parseFloat(document.getElementById('hedge-log-grams').value) || 0;
         const dateVal = document.getElementById('hedge-log-date').value;
+        const isCreditNew = document.getElementById('hedge-log-is-credit').checked; // only meaningful when creating
         const rate = parseFloat(document.getElementById('hedge-log-rate').value) || 0;
         const note = document.getElementById('hedge-log-note').value.trim();
         if (grams <= 0) { showCustomAlert('Enter grams purchased.'); return; }
@@ -1007,6 +1139,30 @@
         if (entryId) {
             const existing = hedgeLog.find(e => e.id === entryId);
             if (!existing) { closeHedgeLogModal(); return; }
+
+            if (existing.isCredit) {
+                // Only the top-level fields change — settlements[] is
+                // untouched here (edited via Settle Partial instead).
+                // grams can't drop below what's already settled, or the
+                // settlement total would exceed the credit total.
+                const { settledGrams } = _creditGroupState(existing);
+                if (grams < settledGrams) {
+                    showCustomAlert(`Can't set this below ${settledGrams.toFixed(2)}g — that much is already settled against it.`);
+                    return;
+                }
+                const updated = { ...existing, metal, grams, note: note || null, date: dateVal, createdAt };
+                try {
+                    await window.dbUpdate(window.dbRef(window.firebaseDB, 'hedgeLog'), { [entryId]: updated });
+                    Object.assign(existing, updated);
+                    closeHedgeLogModal();
+                    renderHedgeDashboard();
+                } catch (e) {
+                    console.error('[HedgeLog] update failed', e);
+                    showCustomAlert(window._writeAllowed ? 'Could not save — try again.' : 'Writes are disabled — this copy is running in read-only mode.');
+                }
+                return;
+            }
+
             const updated = { ...existing, metal, grams, rate, note: note || null, date: dateVal, createdAt, amount: rate ? +(grams * rate).toFixed(2) : 0 };
             try {
                 await window.dbUpdate(window.dbRef(window.firebaseDB, 'hedgeLog'), { [entryId]: updated });
@@ -1021,12 +1177,9 @@
         }
 
         const id = crypto.randomUUID();
-        const entry = {
-            id, planId, metal, grams, rate, note: note || null,
-            amount: rate ? +(grams * rate).toFixed(2) : 0,
-            date: dateVal,
-            createdAt
-        };
+        const entry = isCreditNew
+            ? { id, planId, metal, grams, note: note || null, isCredit: true, settlements: [], date: dateVal, createdAt }
+            : { id, planId, metal, grams, rate, note: note || null, amount: rate ? +(grams * rate).toFixed(2) : 0, date: dateVal, createdAt };
         try {
             await window.dbUpdate(window.dbRef(window.firebaseDB, 'hedgeLog'), { [id]: entry });
             hedgeLog.unshift(entry);
@@ -1046,6 +1199,91 @@
                 renderHedgeDashboard();
             } catch (e) {
                 console.error('[HedgeLog] delete failed', e);
+                showCustomAlert(window._writeAllowed ? 'Could not delete — try again.' : 'Writes are disabled — this copy is running in read-only mode.');
+            }
+        });
+    }
+
+    function openSettlePartialModal(entryId, settlementId){
+        const entry = hedgeLog.find(e => e.id === entryId);
+        if (!entry || !entry.isCredit) return;
+        const editing = !!settlementId;
+        const existing = editing ? (entry.settlements || []).find(s => s.id === settlementId) : null;
+        document.getElementById('settle-entry-id').value = entryId;
+        document.getElementById('settle-settlement-id').value = settlementId || '';
+        document.getElementById('settle-grams').value = existing ? existing.grams : '';
+        document.getElementById('settle-date').value = existing ? existing.date : new Date().toISOString().slice(0, 10);
+        document.getElementById('settle-rate').value = existing ? (existing.rate || '') : '';
+        document.getElementById('settle-note').value = existing ? (existing.note || '') : '';
+        document.getElementById('settle-partial-title').textContent = editing ? 'Edit Settlement' : 'Settle Partial';
+        document.getElementById('settle-save-btn').textContent = editing ? '✓ Save Changes' : '✓ Save Settlement';
+
+        const { pendingGrams } = _creditGroupState(entry);
+        // Editing an existing settlement gets its own grams added back
+        // into "available" — otherwise you couldn't even re-save its
+        // current value unchanged.
+        const available = editing ? pendingGrams + (existing.grams || 0) : pendingGrams;
+        document.getElementById('settle-remaining-note').textContent = `${entry.grams.toFixed(2)}g total credit purchase — ${available.toFixed(2)}g available to settle here.`;
+
+        document.getElementById('settle-partial-modal').classList.add('show');
+    }
+
+    function closeSettlePartialModal(){
+        document.getElementById('settle-partial-modal').classList.remove('show');
+    }
+
+    async function saveSettlement(){
+        const entryId = document.getElementById('settle-entry-id').value;
+        const settlementId = document.getElementById('settle-settlement-id').value || null;
+        const entry = hedgeLog.find(e => e.id === entryId);
+        if (!entry || !entry.isCredit) { closeSettlePartialModal(); return; }
+
+        const grams = parseFloat(document.getElementById('settle-grams').value) || 0;
+        const dateVal = document.getElementById('settle-date').value;
+        const rate = parseFloat(document.getElementById('settle-rate').value) || 0;
+        const note = document.getElementById('settle-note').value.trim();
+        if (grams <= 0) { showCustomAlert('Enter grams settled.'); return; }
+        if (!dateVal) { showCustomAlert('Enter the settlement date.'); return; }
+
+        const settlements = entry.settlements || [];
+        const existingSettlement = settlementId ? settlements.find(s => s.id === settlementId) : null;
+        const { settledGrams } = _creditGroupState(entry);
+        const otherSettledGrams = settledGrams - (existingSettlement ? (existingSettlement.grams || 0) : 0);
+        if (otherSettledGrams + grams > entry.grams + 0.001) { // small epsilon for float safety
+            showCustomAlert(`That's more than the ${(entry.grams - otherSettledGrams).toFixed(2)}g still available on this credit purchase.`);
+            return;
+        }
+
+        const createdAt = new Date(dateVal + 'T12:00:00.000Z').toISOString();
+        let newSettlements;
+        if (existingSettlement) {
+            newSettlements = settlements.map(s => s.id === settlementId ? { ...s, grams, rate, note: note || null, date: dateVal, createdAt } : s);
+        } else {
+            newSettlements = [...settlements, { id: crypto.randomUUID(), grams, rate, note: note || null, date: dateVal, createdAt }];
+        }
+
+        try {
+            await window.dbUpdate(window.dbRef(window.firebaseDB, 'hedgeLog'), { [entryId + '/settlements']: newSettlements });
+            entry.settlements = newSettlements;
+            closeSettlePartialModal();
+            renderHedgeDashboard();
+        } catch (e) {
+            console.error('[HedgeLog] settlement save failed', e);
+            showCustomAlert(window._writeAllowed ? 'Could not save — try again.' : 'Writes are disabled — this copy is running in read-only mode.');
+        }
+    }
+
+    async function deleteSettlement(entryId, settlementId){
+        showCustomConfirm('Delete this settlement? The grams return to pending.', 'Confirm', async () => {
+            const entry = hedgeLog.find(e => e.id === entryId);
+            if (!entry) return;
+            const newSettlements = (entry.settlements || []).filter(s => s.id !== settlementId);
+            try {
+                await window.dbUpdate(window.dbRef(window.firebaseDB, 'hedgeLog'), { [entryId + '/settlements']: newSettlements });
+                entry.settlements = newSettlements;
+                renderHedgeDashboard();
+            } catch (e) {
+                console.error('[HedgeLog] settlement delete failed', e);
                 showCustomAlert(window._writeAllowed ? 'Could not delete — try again.' : 'Writes are disabled — this copy is running in read-only mode.');
             }
         });
