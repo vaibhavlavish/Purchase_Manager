@@ -244,7 +244,10 @@
         <input type="hidden" id="purchase-plan-id" value="">
 
         <label style="font-size:12px; font-weight:700; color:#888; margin:0 0 4px 0;">PARTY</label>
-        <select id="purchase-party" onchange="onPurchasePartyChange()" style="padding:10px 12px; border:1.5px solid #e0e0e0; border-radius:10px; width:100%; font-size:14px; margin-bottom:14px; box-sizing:border-box;"></select>
+        <div style="display:flex; gap:8px; margin-bottom:14px;">
+            <select id="purchase-party" onchange="onPurchasePartyChange()" style="flex:1; padding:10px 12px; border:1.5px solid #e0e0e0; border-radius:10px; font-size:14px; box-sizing:border-box; margin:0;"></select>
+            <button onclick="deleteSelectedParty('purchase-party')" title="Delete this party" style="background:none; border:1.5px solid #e0e0e0; color:#C62828; font-size:16px; width:44px; flex-shrink:0; border-radius:10px; padding:0; margin:0;">🗑️</button>
+        </div>
 
         <label style="font-size:12px; font-weight:700; color:#888; margin:0 0 4px 0;">METAL</label>
         <select id="purchase-metal" style="padding:10px 12px; border:1.5px solid #e0e0e0; border-radius:10px; width:100%; font-size:14px; margin-bottom:14px; box-sizing:border-box;">
@@ -299,7 +302,10 @@
         <p class="note" id="payment-balance-note" style="margin-bottom:14px;"></p>
 
         <label style="font-size:12px; font-weight:700; color:#888; margin:0 0 4px 0;">PARTY</label>
-        <select id="payment-party" onchange="onPaymentSelectionChange()" style="padding:10px 12px; border:1.5px solid #e0e0e0; border-radius:10px; width:100%; font-size:14px; margin-bottom:14px; box-sizing:border-box;"></select>
+        <div style="display:flex; gap:8px; margin-bottom:14px;">
+            <select id="payment-party" onchange="onPaymentSelectionChange()" style="flex:1; padding:10px 12px; border:1.5px solid #e0e0e0; border-radius:10px; font-size:14px; box-sizing:border-box; margin:0;"></select>
+            <button onclick="deleteSelectedParty('payment-party')" title="Delete this party" style="background:none; border:1.5px solid #e0e0e0; color:#C62828; font-size:16px; width:44px; flex-shrink:0; border-radius:10px; padding:0; margin:0;">🗑️</button>
+        </div>
 
         <label style="font-size:12px; font-weight:700; color:#888; margin:0 0 4px 0;">METAL</label>
         <select id="payment-metal" onchange="onPaymentSelectionChange()" style="padding:10px 12px; border:1.5px solid #e0e0e0; border-radius:10px; width:100%; font-size:14px; margin-bottom:14px; box-sizing:border-box;">
@@ -1086,6 +1092,40 @@ function computeCombinedAvgRate(metal){
         select.value = newId || '__new__';
     }
 
+    // Removal is safe to apply optimistically (unlike adding — see
+    // Removal is safe to apply optimistically (unlike adding — see
+    // savePurchase/savePayment) since two independent removals of the
+    // same thing just agree with each other, no duplicate possible.
+    // Existing purchases/payments from this party aren't touched — they
+    // just show "Unknown" (getPartyName's fallback) instead of a name
+    // once it's gone, which the confirm message says plainly up front.
+    async function deleteSelectedParty(selectId){
+        const select = document.getElementById(selectId);
+        const partyId = select.value;
+        if (!partyId || partyId === '__new__') { showCustomAlert('Select a party first.'); return; }
+        const party = parties.find(p => p.id === partyId);
+        if (!party) return;
+
+        showCustomConfirm(
+            `Delete "${party.name}"? Any existing purchases or payments from them will show as "Unknown" going forward — their own numbers aren't affected.`,
+            'Delete Party',
+            async () => {
+                try {
+                    await window.dbUpdate(window.dbRef(window.firebaseDB, 'parties'), { [partyId]: null });
+                    parties = parties.filter(p => p.id !== partyId);
+                    if (selectId === 'purchase-party') {
+                        select.innerHTML = parties.map(p => `<option value="${p.id}">${p.name.replace(/</g, '&lt;')}</option>`).join('') + `<option value="__new__">+ New Party…</option>`;
+                    } else {
+                        _rebuildPaymentPartyDropdown();
+                    }
+                } catch (e) {
+                    console.error('[Parties] delete failed', e);
+                    showCustomAlert(window._writeAllowed ? 'Could not delete — try again.' : 'Writes are disabled — this copy is running in read-only mode.');
+                }
+            }
+        );
+    }
+
     function openPurchaseModal(planId, purchaseId){
         const editing = !!purchaseId;
         const existing = editing ? purchases.find(p => p.id === purchaseId) : null;
@@ -1176,9 +1216,13 @@ function computeCombinedAvgRate(metal){
         if (status === 'paid') entry.rate = rate;
         try {
             await window.dbUpdate(window.dbRef(window.firebaseDB, 'purchases'), { [id]: entry });
-            purchases.unshift(entry);
+            // Not pushing into the local `purchases` array here — the live
+            // Firebase listener (startCoreDataSync) will pick up this
+            // write and update it moments later. Doing both was two
+            // independent code paths mutating the same array, which
+            // produced a transient double-render right after saving that
+            // only cleared up on a full page reload.
             closePurchaseModal();
-            renderPurchaseTab();
         } catch (e) {
             console.error('[Purchases] save failed', e);
             showCustomAlert(window._writeAllowed ? 'Could not save — try again.' : 'Writes are disabled — this copy is running in read-only mode.');
@@ -1209,14 +1253,26 @@ function computeCombinedAvgRate(metal){
         const metal = document.getElementById('payment-metal').value;
         const bal = partyId ? getPartyCreditBalance(partyId, currentInvTrack, metal) : 0;
         document.getElementById('payment-balance-note').textContent = partyId
-            ? `${bal.toFixed(2)}g outstanding for ${getPartyName(partyId)} (${metal}, Track ${currentInvTrack}).`
+            ? `${bal.toFixed(2)}g outstanding for ${getPartyName(partyId)} (${metal}).`
             : '';
     }
 
+    // Only parties with actual outstanding credit (in either metal, on
+    // the current track) belong in this list — paying someone who
+    // doesn't owe anything isn't a valid action here.
+    function _rebuildPaymentPartyDropdown(){
+        const select = document.getElementById('payment-party');
+        const eligible = parties.filter(p =>
+            getPartyCreditBalance(p.id, currentInvTrack, 'Gold') > 0.001 ||
+            getPartyCreditBalance(p.id, currentInvTrack, 'Silver') > 0.001
+        );
+        select.innerHTML = eligible.map(p => `<option value="${p.id}">${p.name.replace(/</g, '&lt;')}</option>`).join('');
+        return eligible;
+    }
+
     function openPaymentModal(){
-        if (!parties.length) { showCustomAlert('Add a party via Purchase first.'); return; }
-        const partySelect = document.getElementById('payment-party');
-        partySelect.innerHTML = parties.map(p => `<option value="${p.id}">${p.name.replace(/</g, '&lt;')}</option>`).join('');
+        const eligible = _rebuildPaymentPartyDropdown();
+        if (!eligible.length) { showCustomAlert('No parties have outstanding credit right now.'); return; }
         document.getElementById('payment-metal').value = 'Gold';
         document.getElementById('payment-weight').value = '';
         document.getElementById('payment-date').value = new Date().toISOString().slice(0, 10);
@@ -1251,7 +1307,6 @@ function computeCombinedAvgRate(metal){
         const entry = { id, partyId, track: currentInvTrack, metal, weight, rate, note: note || null, date: dateVal, createdAt };
         try {
             await window.dbUpdate(window.dbRef(window.firebaseDB, 'payments'), { [id]: entry });
-            payments.unshift(entry);
             closePaymentModal();
         } catch (e) {
             console.error('[Payments] save failed', e);
