@@ -179,8 +179,7 @@
 
     <div id="pm-tabs" style="display:flex; border-bottom:1px solid var(--border); background:var(--surface);">
         <div id="pm-tab-sales" onclick="pmSwitchTab('sales')" style="flex:1; display:flex; align-items:center; justify-content:center; padding:13px 4px; font-size:13px; font-weight:700; border-right:1px solid var(--border); background:transparent; cursor:pointer; color:var(--text2); text-align:center; user-select:none;">📈 Sales</div>
-        <div id="pm-tab-purchase" onclick="pmSwitchTab('purchase')" style="flex:1; display:flex; align-items:center; justify-content:center; padding:13px 4px; font-size:13px; font-weight:700; border-right:1px solid var(--border); background:transparent; cursor:pointer; color:var(--text2); text-align:center; user-select:none;">🛒 Purchase</div>
-        <div id="pm-tab-payment" onclick="pmSwitchTab('payment')" style="flex:1; display:flex; align-items:center; justify-content:center; padding:13px 4px; font-size:13px; font-weight:700; background:transparent; cursor:pointer; color:var(--text2); text-align:center; user-select:none;">💳 Payment</div>
+        <div id="pm-tab-purchase" onclick="pmSwitchTab('purchase')" style="flex:1; display:flex; align-items:center; justify-content:center; padding:13px 4px; font-size:13px; font-weight:700; background:transparent; cursor:pointer; color:var(--text2); text-align:center; user-select:none;">🛒 Purchase</div>
     </div>
 
     <div id="pm-content">
@@ -211,6 +210,11 @@
         <div id="pm-pane-purchase" style="display:none;">
             <p class="note" style="margin:0 0 12px;">Grams shown are pure (24K/999) equivalent.</p>
 
+            <div style="display:flex; gap:10px; margin-bottom:12px;">
+                <button onclick="openPurchaseModal(null)" style="flex:1; padding:13px; background:var(--gold); color:white; border:none; border-radius:12px; font-size:14px; font-weight:800;">🛒 Purchase</button>
+                <button onclick="openPaymentModal()" style="flex:1; padding:13px; background:#1a1a1a; color:white; border:none; border-radius:12px; font-size:14px; font-weight:800;">💳 Payment</button>
+            </div>
+
             <div style="display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:12px; background:var(--surface); border-radius:var(--radius); padding:10px 14px; box-shadow:0 1px 6px rgba(0,0,0,.06);">
                 <label for="hedge-sales-start-date" style="font-size:11px; color:var(--text2); font-weight:700;">Count sales since</label>
                 <input type="date" id="hedge-sales-start-date" onchange="setSalesHedgeStartDate(this.value)" style="margin:0; width:auto;">
@@ -227,13 +231,6 @@
 
             <div id="hedge-sales-track" style="margin-bottom:20px;"></div>
         </div>
-
-        <div id="pm-pane-payment" style="display:none;">
-            <p class="note" style="margin:0 0 12px;">Only parties with outstanding credit on the current track are shown.</p>
-            <div id="payment-party-list" style="margin-bottom:20px;"></div>
-            <div style="font-size:10px; font-weight:700; letter-spacing:.08em; color:var(--text2); text-transform:uppercase; margin-bottom:8px;">Payment History — Current Track</div>
-            <div id="payment-history-list"></div>
-        </div>
     </div>
 </div>
 
@@ -247,7 +244,7 @@
         <input type="hidden" id="purchase-plan-id" value="">
 
         <label style="font-size:12px; font-weight:700; color:#888; margin:0 0 4px 0;">PARTY</label>
-        <select id="purchase-party" style="padding:10px 12px; border:1.5px solid #e0e0e0; border-radius:10px; width:100%; font-size:14px; margin-bottom:14px; box-sizing:border-box;"></select>
+        <select id="purchase-party" onchange="onPurchasePartyChange()" style="padding:10px 12px; border:1.5px solid #e0e0e0; border-radius:10px; width:100%; font-size:14px; margin-bottom:14px; box-sizing:border-box;"></select>
 
         <label style="font-size:12px; font-weight:700; color:#888; margin:0 0 4px 0;">METAL</label>
         <select id="purchase-metal" style="padding:10px 12px; border:1.5px solid #e0e0e0; border-radius:10px; width:100%; font-size:14px; margin-bottom:14px; box-sizing:border-box;">
@@ -299,14 +296,13 @@
             <h3 id="payment-title" style="margin:0; font-size:18px; color:#1a1a1a;">New Payment</h3>
             <button onclick="closePaymentModal()" style="background:none; border:none; font-size:22px; color:#aaa; padding:0; width:auto; box-shadow:none; margin:0;">✕</button>
         </div>
-        <input type="hidden" id="payment-id" value="">
         <p class="note" id="payment-balance-note" style="margin-bottom:14px;"></p>
 
         <label style="font-size:12px; font-weight:700; color:#888; margin:0 0 4px 0;">PARTY</label>
-        <select id="payment-party" style="padding:10px 12px; border:1.5px solid #e0e0e0; border-radius:10px; width:100%; font-size:14px; margin-bottom:14px; box-sizing:border-box;"></select>
+        <select id="payment-party" onchange="onPaymentSelectionChange()" style="padding:10px 12px; border:1.5px solid #e0e0e0; border-radius:10px; width:100%; font-size:14px; margin-bottom:14px; box-sizing:border-box;"></select>
 
         <label style="font-size:12px; font-weight:700; color:#888; margin:0 0 4px 0;">METAL</label>
-        <select id="payment-metal" style="padding:10px 12px; border:1.5px solid #e0e0e0; border-radius:10px; width:100%; font-size:14px; margin-bottom:14px; box-sizing:border-box;">
+        <select id="payment-metal" onchange="onPaymentSelectionChange()" style="padding:10px 12px; border:1.5px solid #e0e0e0; border-radius:10px; width:100%; font-size:14px; margin-bottom:14px; box-sizing:border-box;">
             <option value="Gold">Gold</option>
             <option value="Silver">Silver</option>
         </select>
@@ -420,7 +416,6 @@
     let _pmTapCount = 0, _pmTapTimer = null;
     function _pmRerenderActiveTab(){
         if (_pmActiveTab === 'sales') renderSalesReport();
-        else if (_pmActiveTab === 'payment') renderPaymentTab();
         else renderPurchaseTab();
     }
     function pmHandleBrandTap() {
@@ -1036,10 +1031,7 @@ function computeCombinedAvgRate(metal){
                 <div style="background:var(--surface); border-radius:var(--radius); padding:12px 14px; margin-bottom:8px; box-shadow:0 1px 6px rgba(0,0,0,.06);">
                     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
                         <span style="font-weight:700;">Purchases</span>
-                        <div style="display:flex; align-items:center; gap:6px;">
-                            <button onclick="openManualOwedModal()" title="Add a durable owed entry" style="background:none; border:1.5px solid var(--border); color:var(--text2); font-weight:700; padding:5px 10px; border-radius:8px; font-size:11.5px; width:auto; margin:0;">+ Add Owed</button>
-                            <button onclick="openPurchaseModal(null)" style="background:none; border:1.5px solid var(--border); color:var(--text); font-weight:700; padding:5px 10px; border-radius:8px; font-size:11.5px; width:auto; margin:0;">+ New Purchase</button>
-                        </div>
+                        <button onclick="openManualOwedModal()" title="Add a durable owed entry" style="background:none; border:1.5px solid var(--border); color:var(--text2); font-weight:700; padding:5px 10px; border-radius:8px; font-size:11.5px; width:auto; margin:0;">+ Add Owed</button>
                     </div>
                     <div style="font-size:12.5px; color:var(--text2);">${salesStatusLine}</div>
                     ${avgRateLine}
@@ -1081,6 +1073,19 @@ function computeCombinedAvgRate(metal){
         document.getElementById('purchase-credit-note').style.display = isCredit ? 'block' : 'none';
     }
 
+    // Selecting "+ New Party…" prompts right away, instead of waiting
+    // until Save to discover a name is needed — creates the party,
+    // rebuilds the dropdown, and lands on the newly-added one selected.
+    async function onPurchasePartyChange(){
+        const select = document.getElementById('purchase-party');
+        if (select.value !== '__new__') return;
+        const name = prompt('New party name:');
+        if (!name) { select.value = parties.length ? parties[0].id : '__new__'; return; }
+        const newId = await addParty(name);
+        select.innerHTML = parties.map(p => `<option value="${p.id}">${p.name.replace(/</g, '&lt;')}</option>`).join('') + `<option value="__new__">+ New Party…</option>`;
+        select.value = newId || '__new__';
+    }
+
     function openPurchaseModal(planId, purchaseId){
         const editing = !!purchaseId;
         const existing = editing ? purchases.find(p => p.id === purchaseId) : null;
@@ -1092,6 +1097,7 @@ function computeCombinedAvgRate(metal){
         const partySelect = document.getElementById('purchase-party');
         partySelect.innerHTML = parties.map(p => `<option value="${p.id}">${p.name.replace(/</g, '&lt;')}</option>`).join('') + `<option value="__new__">+ New Party…</option>`;
         if (existing) partySelect.value = existing.partyId;
+        else if (!parties.length) onPurchasePartyChange(); // only option is "+ New Party…" — onchange can never fire with one option, so ask right away
 
         document.getElementById('purchase-metal').value = existing ? existing.metal : 'Gold';
         document.getElementById('purchase-weight').value = existing ? existing.weight : '';
@@ -1193,86 +1199,30 @@ function computeCombinedAvgRate(metal){
     }
 
     // ── Payment tab ──
-    function renderPaymentTab(){
-        const track = currentInvTrack;
-        const listEl = document.getElementById('payment-party-list');
-        const historyEl = document.getElementById('payment-history-list');
-        if (!listEl) return;
-
-        const rows = [];
-        parties.forEach(party => {
-            ['Gold', 'Silver'].forEach(metal => {
-                const bal = getPartyCreditBalance(party.id, track, metal);
-                if (bal > 0.001) rows.push({ party, metal, bal });
-            });
-        });
-
-        listEl.innerHTML = rows.length
-            ? rows.map(r => `
-                <div style="display:flex; justify-content:space-between; align-items:center; background:var(--surface); border-radius:var(--radius); padding:12px 14px; margin-bottom:8px; box-shadow:0 1px 6px rgba(0,0,0,.06);">
-                    <div style="font-size:13px;">
-                        <b>${r.party.name.replace(/</g, '&lt;')}</b>
-                        <div style="font-size:11.5px; color:#FB8C00;">${r.metal} · ${r.bal.toFixed(2)}g outstanding on Track ${track}</div>
-                    </div>
-                    <button onclick="openPaymentModal('${r.party.id}', '${r.metal}')" style="background:none; border:1.5px solid var(--border); color:var(--text); font-weight:700; padding:6px 12px; border-radius:8px; font-size:12px; width:auto; margin:0;">+ Pay</button>
-                </div>`).join('')
-            : `<p class="note" style="text-align:center; margin-top:10px;">No outstanding credit on Track ${track}.</p>`;
-
-        const trackStartDate = getSalesHedgeStartDate(track);
-        const history = payments.filter(pay => pay.track === track && new Date(pay.createdAt) >= trackStartDate)
-            .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
-        historyEl.innerHTML = history.length
-            ? history.map(pay => `
-                <div style="display:flex; justify-content:space-between; align-items:center; background:var(--surface); border-radius:var(--radius); padding:10px 14px; margin-bottom:8px; box-shadow:0 1px 6px rgba(0,0,0,.06);">
-                    <div style="font-size:12.5px;">
-                        <b>${getPartyName(pay.partyId).replace(/</g, '&lt;')}</b> · ${pay.metal} · ${(pay.weight || 0).toFixed(2)}g ${pay.rate ? `@ ₹${pay.rate.toFixed(2)}/g` : '(metal)'}
-                        <div style="font-size:10.5px; color:var(--text2);">${pay.date || ''}${pay.note ? ' · ' + pay.note.replace(/</g, '&lt;') : ''}</div>
-                    </div>
-                    <div style="display:flex; align-items:center; gap:8px;">
-                        <button onclick="openPaymentEditModal('${pay.id}')" title="Edit" style="background:none; border:1.5px solid var(--border); color:var(--text); font-weight:700; padding:5px 10px; border-radius:8px; font-size:11px; width:auto; margin:0;">Edit</button>
-                        <button onclick="deletePayment('${pay.id}')" title="Remove" style="background:none; border:none; color:#C62828; font-size:16px; padding:0; width:auto; box-shadow:none; margin:0;">✕</button>
-                    </div>
-                </div>`).join('')
-            : `<p class="note" style="text-align:center; margin-top:10px;">No payments logged yet.</p>`;
+    // ── Payment — standalone action, no dedicated view for now (the user
+    // tracks outstanding credit themselves; may build a visibility
+    // feature later). Party and metal are both freely selectable here,
+    // with a live "X g outstanding" note that updates as either changes,
+    // and the same over-payment guard as before.
+    function onPaymentSelectionChange(){
+        const partyId = document.getElementById('payment-party').value;
+        const metal = document.getElementById('payment-metal').value;
+        const bal = partyId ? getPartyCreditBalance(partyId, currentInvTrack, metal) : 0;
+        document.getElementById('payment-balance-note').textContent = partyId
+            ? `${bal.toFixed(2)}g outstanding for ${getPartyName(partyId)} (${metal}, Track ${currentInvTrack}).`
+            : '';
     }
 
-    function openPaymentModal(partyId, metal){
-        document.getElementById('payment-id').value = '';
+    function openPaymentModal(){
+        if (!parties.length) { showCustomAlert('Add a party via Purchase first.'); return; }
         const partySelect = document.getElementById('payment-party');
         partySelect.innerHTML = parties.map(p => `<option value="${p.id}">${p.name.replace(/</g, '&lt;')}</option>`).join('');
-        partySelect.value = partyId;
-        partySelect.disabled = true; // party+metal identify which credit pool this reduces — fixed once opened from that pool's own Pay button
-        document.getElementById('payment-metal').value = metal;
-        document.getElementById('payment-metal').disabled = true;
+        document.getElementById('payment-metal').value = 'Gold';
         document.getElementById('payment-weight').value = '';
         document.getElementById('payment-date').value = new Date().toISOString().slice(0, 10);
         document.getElementById('payment-rate').value = '';
         document.getElementById('payment-note').value = '';
-        const bal = getPartyCreditBalance(partyId, currentInvTrack, metal);
-        document.getElementById('payment-balance-note').textContent = `${bal.toFixed(2)}g outstanding for ${getPartyName(partyId)} (${metal}, Track ${currentInvTrack}).`;
-        document.getElementById('payment-title').textContent = 'New Payment';
-        document.getElementById('payment-save-btn').textContent = '✓ Save Payment';
-        document.getElementById('payment-modal').classList.add('show');
-    }
-
-    function openPaymentEditModal(paymentId){
-        const pay = payments.find(x => x.id === paymentId);
-        if (!pay) return;
-        document.getElementById('payment-id').value = paymentId;
-        const partySelect = document.getElementById('payment-party');
-        partySelect.innerHTML = parties.map(p => `<option value="${p.id}">${p.name.replace(/</g, '&lt;')}</option>`).join('');
-        partySelect.value = pay.partyId;
-        partySelect.disabled = true;
-        document.getElementById('payment-metal').value = pay.metal;
-        document.getElementById('payment-metal').disabled = true;
-        document.getElementById('payment-weight').value = pay.weight;
-        document.getElementById('payment-date').value = pay.date;
-        document.getElementById('payment-rate').value = pay.rate || '';
-        document.getElementById('payment-note').value = pay.note || '';
-        const bal = getPartyCreditBalance(pay.partyId, pay.track, pay.metal) + (pay.weight || 0);
-        document.getElementById('payment-balance-note').textContent = `${bal.toFixed(2)}g available here (including this payment's own current amount).`;
-        document.getElementById('payment-title').textContent = 'Edit Payment';
-        document.getElementById('payment-save-btn').textContent = '✓ Save Changes';
+        onPaymentSelectionChange();
         document.getElementById('payment-modal').classList.add('show');
     }
 
@@ -1281,7 +1231,6 @@ function computeCombinedAvgRate(metal){
     }
 
     async function savePayment(){
-        const paymentId = document.getElementById('payment-id').value || null;
         const partyId = document.getElementById('payment-party').value;
         const metal = document.getElementById('payment-metal').value;
         const weight = parseFloat(document.getElementById('payment-weight').value) || 0;
@@ -1291,55 +1240,25 @@ function computeCombinedAvgRate(metal){
         if (weight <= 0) { showCustomAlert('Enter weight paid.'); return; }
         if (!dateVal) { showCustomAlert('Enter the payment date.'); return; }
 
-        const existing = paymentId ? payments.find(p => p.id === paymentId) : null;
-        const track = existing ? existing.track : currentInvTrack;
-        const available = getPartyCreditBalance(partyId, track, metal) + (existing ? (existing.weight || 0) : 0);
+        const available = getPartyCreditBalance(partyId, currentInvTrack, metal);
         if (weight > available + 0.001) {
             showCustomAlert(`That's more than the ${available.toFixed(2)}g still outstanding.`);
             return;
         }
 
         const createdAt = new Date(dateVal + 'T12:00:00.000Z').toISOString();
-
-        if (paymentId) {
-            const updated = { ...existing, weight, date: dateVal, createdAt, rate, note: note || null };
-            try {
-                await window.dbUpdate(window.dbRef(window.firebaseDB, 'payments'), { [paymentId]: updated });
-                Object.assign(existing, updated);
-                closePaymentModal();
-                renderPaymentTab();
-            } catch (e) {
-                console.error('[Payments] update failed', e);
-                showCustomAlert(window._writeAllowed ? 'Could not save — try again.' : 'Writes are disabled — this copy is running in read-only mode.');
-            }
-            return;
-        }
-
         const id = crypto.randomUUID();
-        const entry = { id, partyId, track, metal, weight, rate, note: note || null, date: dateVal, createdAt };
+        const entry = { id, partyId, track: currentInvTrack, metal, weight, rate, note: note || null, date: dateVal, createdAt };
         try {
             await window.dbUpdate(window.dbRef(window.firebaseDB, 'payments'), { [id]: entry });
             payments.unshift(entry);
             closePaymentModal();
-            renderPaymentTab();
         } catch (e) {
             console.error('[Payments] save failed', e);
             showCustomAlert(window._writeAllowed ? 'Could not save — try again.' : 'Writes are disabled — this copy is running in read-only mode.');
         }
     }
 
-    async function deletePayment(id){
-        showCustomConfirm('Delete this payment? The weight returns to outstanding credit.', 'Confirm', async () => {
-            try {
-                await window.dbUpdate(window.dbRef(window.firebaseDB, 'payments'), { [id]: null });
-                payments = payments.filter(p => p.id !== id);
-                renderPaymentTab();
-            } catch (e) {
-                console.error('[Payments] delete failed', e);
-                showCustomAlert(window._writeAllowed ? 'Could not delete — try again.' : 'Writes are disabled — this copy is running in read-only mode.');
-            }
-        });
-    }
 
     // ── Manual owed modal ──
     function openManualOwedModal(entryId){
@@ -1417,13 +1336,10 @@ function computeCombinedAvgRate(metal){
         _pmActiveTab = name;
         document.getElementById('pm-pane-sales').style.display = name === 'sales' ? '' : 'none';
         document.getElementById('pm-pane-purchase').style.display = name === 'purchase' ? '' : 'none';
-        document.getElementById('pm-pane-payment').style.display = name === 'payment' ? '' : 'none';
         document.getElementById('pm-tab-sales').style.color = name === 'sales' ? 'var(--gold)' : 'var(--text2)';
         document.getElementById('pm-tab-purchase').style.color = name === 'purchase' ? 'var(--gold)' : 'var(--text2)';
-        document.getElementById('pm-tab-payment').style.color = name === 'payment' ? 'var(--gold)' : 'var(--text2)';
         if (name === 'sales') invInitReportDates();
         if (name === 'purchase') renderPurchaseTab();
-        if (name === 'payment') renderPaymentTab();
     }
 
     // ── Sales Report (ported from POS.html's Invoice > Report tab) ──
