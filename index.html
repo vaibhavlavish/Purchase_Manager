@@ -831,6 +831,13 @@ function computeCombinedAvgRate(metal){
     }
 
 
+    // ── Purchase P&L metal tab state ──
+    let _hedgePnlTab = 'Gold';
+    function _setHedgePnlTab(metal){
+        _hedgePnlTab = metal;
+        renderPurchaseTab();
+    }
+
     // ── Expand/collapse state ──
     let _hedgeExpandedPlans = new Set();
     function _toggleHedgePlanEntries(key){
@@ -898,18 +905,36 @@ function computeCombinedAvgRate(metal){
             pnlEl.innerHTML = '';
         } else {
             pnlEl.style.display = '';
-            const pnlColor = pnl.totalPnl >= 0 ? '#2E7D32' : '#C62828';
+            // Split rows by metal (logic unchanged — computePnl() still totals everything;
+            // we just filter/subtotal the same rows per metal for display).
+            const goldRows = pnl.rows.filter(r => r.metal === 'Gold');
+            const silverRows = pnl.rows.filter(r => r.metal === 'Silver');
+            const goldTotal = goldRows.reduce((s, r) => s + r.pnl, 0);
+            const silverTotal = silverRows.reduce((s, r) => s + r.pnl, 0);
+            if (!goldRows.length && silverRows.length) _hedgePnlTab = 'Silver';
+            if (!silverRows.length && goldRows.length) _hedgePnlTab = 'Gold';
+            const activeRows = _hedgePnlTab === 'Silver' ? silverRows : goldRows;
+            const activeTotal = _hedgePnlTab === 'Silver' ? silverTotal : goldTotal;
+            const tabBtn = (metal, icon, total, count) => `
+                <button onclick="_setHedgePnlTab('${metal}')" style="flex:1; margin:0; padding:6px 8px; border-radius:8px; font-size:11px; font-weight:700; box-shadow:none; ${_hedgePnlTab === metal ? 'background:var(--accent, #333); color:#fff; border:1.5px solid var(--accent, #333);' : 'background:none; color:var(--text2); border:1.5px solid var(--border);'}">
+                    ${icon} ${metal} <span style="opacity:.75;">(${count})</span>
+                </button>`;
+            const pnlColor = activeTotal >= 0 ? '#2E7D32' : '#C62828';
             pnlEl.innerHTML = `
-                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
-                    <div style="font-size:10px; font-weight:700; letter-spacing:.08em; color:var(--text2); text-transform:uppercase;">Purchase P&L</div>
-                    <div style="font-size:18px; font-weight:800; color:${pnlColor};">${pnl.totalPnl >= 0 ? '+' : ''}₹${pnl.totalPnl.toFixed(2)}</div>
+                <div style="font-size:10px; font-weight:700; letter-spacing:.08em; color:var(--text2); text-transform:uppercase; margin-bottom:10px;">Purchase P&L</div>
+                <div style="display:flex; gap:6px; margin-bottom:10px;">
+                    ${tabBtn('Gold', '🟡', goldTotal, goldRows.length)}
+                    ${tabBtn('Silver', '⚪', silverTotal, silverRows.length)}
                 </div>
-                ${pnl.rows.map(r => `
+                <div style="display:flex; justify-content:flex-end; align-items:center; margin-bottom:10px;">
+                    <div style="font-size:18px; font-weight:800; color:${pnlColor};">${activeTotal >= 0 ? '+' : ''}₹${activeTotal.toFixed(2)}</div>
+                </div>
+                ${activeRows.length ? activeRows.map(r => `
                     <div style="display:flex; justify-content:space-between; font-size:12px; padding:4px 0; border-top:1px solid var(--border);">
-                        <span style="color:var(--text2);">${r.label} · ${r.metal} · ${r.weight.toFixed(2)}g<br><span style="font-size:10.5px;">Paid ₹${r.rate.toFixed(2)}/g vs booked ₹${r.bookedRate.toFixed(2)}/g</span></span>
+                        <span style="color:var(--text2);">${r.label} · ${r.weight.toFixed(2)}g<br><span style="font-size:10.5px;">Paid ₹${r.rate.toFixed(2)}/g vs booked ₹${r.bookedRate.toFixed(2)}/g</span></span>
                         <span style="font-weight:700; color:${r.pnl >= 0 ? '#2E7D32' : '#C62828'}; white-space:nowrap;">${r.pnl >= 0 ? '+' : ''}₹${r.pnl.toFixed(2)}</span>
                     </div>
-                `).join('')}`;
+                `).join('') : `<div style="font-size:12px; color:var(--text2); padding:6px 0;">No ${_hedgePnlTab.toLowerCase()} entries.</div>`}`;
         }
 
         const plansEl = document.getElementById('hedge-plans-list');
