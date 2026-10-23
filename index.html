@@ -1478,6 +1478,12 @@ function computeCombinedAvgRate(metal){
         _salesReportItemsExpanded = !_salesReportItemsExpanded;
         renderSalesReport();
     }
+    const _salesReportExpandedItems = {};
+    function _toggleSalesReportItemRow(encKey){
+        const k = decodeURIComponent(encKey);
+        _salesReportExpandedItems[k] = !_salesReportExpandedItems[k];
+        renderSalesReport();
+    }
     let _salesReportMetalCardExpanded = null;
     function _toggleSalesReportMetalCard(metal){
         _salesReportMetalCardExpanded = (_salesReportMetalCardExpanded === metal) ? null : metal;
@@ -1547,7 +1553,15 @@ function computeCombinedAvgRate(metal){
                 // Custom items get their own section in the item-wise list (not "Other")
                 const isCustom = !!item.isCustom;
                 const key = isCustom ? ('custom||' + actualName) : (metal + '|' + stamp + '|' + actualName);
-                if (!itemStats[key]) itemStats[key] = { name: actualName, metal: isCustom ? '' : metal, stamp: isCustom ? '' : stamp, custom: isCustom, qty: 0, weight: 0, value: 0 };
+                if (!itemStats[key]) itemStats[key] = { key: key, name: actualName, metal: isCustom ? '' : metal, stamp: isCustom ? '' : stamp, custom: isCustom, qty: 0, weight: 0, value: 0, tags: [] };
+                const _pd = (item.barcode && productData[item.barcode]) || {};
+                itemStats[key].tags.push({
+                    tag: item.barcode || '',
+                    weight: item.nlWt || 0,
+                    size: item.size || _pd.size || '',
+                    design: item.design || _pd.design || '',
+                    price: invTaxableVal(item) * (1 + invTaxFrac) + (parseFloat(item.hm) || 0)
+                });
                 itemStats[key].qty += (item.pc || 1);
                 itemStats[key].weight += (item.nlWt || 0);
                 // Tax-inclusive: taxable value + GST, plus any H/M (hallmark) charge, which is untaxed
@@ -1590,6 +1604,30 @@ function computeCombinedAvgRate(metal){
                 </div>`;
         };
 
+        const itemRowHtml = s => {
+            const open = !!_salesReportExpandedItems[s.key];
+            const enc = encodeURIComponent(s.key).replace(/'/g, '%27');
+            const tags = (s.tags || []).slice().sort((a, b) => (a.weight - b.weight) || String(a.tag).localeCompare(String(b.tag)));
+            const hasDesign = tags.some(t => t.design);
+            const detail = open ? `
+                <div style="background:var(--surface); border-radius:0 0 var(--radius) var(--radius); padding:6px 14px 10px; margin:-6px 0 6px; box-shadow:0 1px 6px rgba(0,0,0,.06);">
+                    <div style="display:grid; grid-template-columns:${hasDesign ? '1.2fr .9fr .8fr 1.2fr 1fr' : '1.2fr .9fr .8fr 1fr'}; gap:6px; font-size:10px; font-weight:700; letter-spacing:.06em; color:var(--text2); text-transform:uppercase; padding:4px 0; border-bottom:1px solid var(--border);">
+                        <span>Tag</span><span>Weight</span><span>Size</span>${hasDesign ? '<span>Design</span>' : ''}<span style="text-align:right;">Price</span>
+                    </div>
+                    ${tags.map(t => `
+                    <div style="display:grid; grid-template-columns:${hasDesign ? '1.2fr .9fr .8fr 1.2fr 1fr' : '1.2fr .9fr .8fr 1fr'}; gap:6px; font-size:12px; padding:4px 0;">
+                        <span style="font-weight:700;">${t.tag || '-'}</span><span>${t.weight > 0 ? t.weight.toFixed(2) + 'g' : '-'}</span><span>${t.size || '-'}</span>${hasDesign ? `<span>${t.design || '-'}</span>` : ''}<span style="text-align:right; font-weight:700;">₹${(t.price || 0).toFixed(2)}</span>
+                    </div>`).join('')}
+                </div>` : '';
+            return `
+                <div onclick="_toggleSalesReportItemRow('${enc}')" style="display:flex; justify-content:space-between; align-items:center; background:var(--surface); border-radius:var(--radius); padding:10px 14px; margin-bottom:6px; box-shadow:0 1px 6px rgba(0,0,0,.06); cursor:pointer; user-select:none;">
+                    <div style="font-size:13px; font-weight:700;"><span style="font-size:11px; color:var(--text2); margin-right:6px;">${open ? '▾' : '▸'}</span>${s.name}</div>
+                    <div style="text-align:right; font-size:12px; color:var(--text2);">
+                        ${s.qty} pc${s.qty === 1 ? '' : 's'} · ${s.weight > 0 ? s.weight.toFixed(2) + 'g · ' : ''}₹${s.value.toFixed(2)}
+                    </div>
+                </div>${detail}`;
+        };
+
         const groupOrder = [['Gold', '🟡 Gold'], ['Silver', '⚪ Silver'], ['__custom', '🧩 Custom Items'], ['', 'Other']];
         const itemSectionsHtml = groupOrder.map(([metalKey, label]) => {
             const rows = Object.values(itemStats).filter(s => metalKey === '__custom' ? s.custom : (!s.custom && s.metal === metalKey));
@@ -1598,13 +1636,7 @@ function computeCombinedAvgRate(metal){
             if (!metalKey || metalKey === '__custom') {
                 return `
                     <div style="font-size:11px; font-weight:800; color:var(--text); margin:12px 0 6px;">${label}</div>
-                    ${rows.sort((a, b) => (b.weight - a.weight) || (b.value - a.value)).map(s => `
-                        <div style="display:flex; justify-content:space-between; align-items:center; background:var(--surface); border-radius:var(--radius); padding:10px 14px; margin-bottom:6px; box-shadow:0 1px 6px rgba(0,0,0,.06);">
-                            <div style="font-size:13px; font-weight:700;">${s.name}</div>
-                            <div style="text-align:right; font-size:12px; color:var(--text2);">
-                                ${s.qty} pc${s.qty === 1 ? '' : 's'} · ${s.weight > 0 ? s.weight.toFixed(2) + 'g · ' : ''}₹${s.value.toFixed(2)}
-                            </div>
-                        </div>`).join('')}`;
+                    ${rows.sort((a, b) => (b.weight - a.weight) || (b.value - a.value)).map(itemRowHtml).join('')}`;
             }
 
             const byStamp = {};
@@ -1623,13 +1655,7 @@ function computeCombinedAvgRate(metal){
                         <span style="font-size:11.5px; font-weight:700; color:var(--text2);">${stampName}</span>
                         <span style="font-size:11px; color:var(--text2);">${g.qty} pc${g.qty === 1 ? '' : 's'} · ${g.weight.toFixed(2)}g · ₹${g.value.toFixed(2)}</span>
                     </div>
-                    ${g.items.sort((a, b) => b.weight - a.weight).map(s => `
-                        <div style="display:flex; justify-content:space-between; align-items:center; background:var(--surface); border-radius:var(--radius); padding:10px 14px; margin-bottom:6px; box-shadow:0 1px 6px rgba(0,0,0,.06);">
-                            <div style="font-size:13px; font-weight:700;">${s.name}</div>
-                            <div style="text-align:right; font-size:12px; color:var(--text2);">
-                                ${s.qty} pc${s.qty === 1 ? '' : 's'} · ${s.weight > 0 ? s.weight.toFixed(2) + 'g · ' : ''}₹${s.value.toFixed(2)}
-                            </div>
-                        </div>`).join('')}`).join('');
+                    ${g.items.sort((a, b) => b.weight - a.weight).map(itemRowHtml).join('')}`).join('');
 
             return `
                 <div style="font-size:11px; font-weight:800; color:var(--text); margin:12px 0 6px;">${label}</div>
