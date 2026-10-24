@@ -137,13 +137,13 @@
         }
         #pm-content { flex: 1; overflow-y: auto; padding: 14px; max-width: 600px; margin: 0 auto; width: 100%; box-sizing: border-box; }
 
-        #purchase-modal, #payment-modal, #manual-owed-modal, #pm-alert-modal {
+        #purchase-modal, #payment-modal, #manual-owed-modal, #piece-bill-modal, #pm-alert-modal {
             display: none; position: fixed; inset: 0;
             background: rgba(0,0,0,0.55); z-index: 1150;
             align-items: flex-end; justify-content: center;
         }
-        #purchase-modal.show, #payment-modal.show, #manual-owed-modal.show, #pm-alert-modal.show { display: flex; }
-        #purchase-panel, #payment-panel, #manual-owed-panel, #pm-alert-panel {
+        #purchase-modal.show, #payment-modal.show, #manual-owed-modal.show, #piece-bill-modal.show, #pm-alert-modal.show { display: flex; }
+        #purchase-panel, #payment-panel, #manual-owed-panel, #piece-bill-panel, #pm-alert-panel {
             background: white; border-radius: 20px 20px 0 0;
             width: 100%; max-width: 480px;
             padding: 22px 20px 30px;
@@ -180,6 +180,7 @@
     <div id="pm-tabs" style="display:flex; border-bottom:1px solid var(--border); background:var(--surface);">
         <div id="pm-tab-sales" onclick="pmSwitchTab('sales')" style="flex:1; display:flex; align-items:center; justify-content:center; padding:13px 4px; font-size:13px; font-weight:700; border-right:1px solid var(--border); background:transparent; cursor:pointer; color:var(--text2); text-align:center; user-select:none;">📈 Sales</div>
         <div id="pm-tab-purchase" onclick="pmSwitchTab('purchase')" style="flex:1; display:flex; align-items:center; justify-content:center; padding:13px 4px; font-size:13px; font-weight:700; background:transparent; cursor:pointer; color:var(--text2); text-align:center; user-select:none;">🛒 Purchase</div>
+        <div id="pm-tab-report" onclick="pmSwitchTab('report')" style="display:none; flex:1; align-items:center; justify-content:center; padding:13px 4px; font-size:13px; font-weight:700; border-left:1px solid var(--border); background:transparent; cursor:pointer; color:var(--text2); text-align:center; user-select:none;">📊 Report</div>
     </div>
 
     <div id="pm-content">
@@ -207,6 +208,34 @@
             <div id="inv-rep-results"></div>
         </div>
 
+        <div id="pm-pane-report" style="display:none;">
+            <div style="background:var(--surface); border-radius:var(--radius); padding:14px; box-shadow:0 1px 6px rgba(0,0,0,.06); margin-bottom:12px;">
+                <div style="font-size:10px; font-weight:700; letter-spacing:.08em; color:var(--text2); text-transform:uppercase; margin-bottom:10px;">Report period</div>
+                <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:10px;">
+                    <div><label style="font-size:11px; display:block; margin-bottom:3px;">From</label><input type="date" id="rp-from" onchange="rpSetDates()" style="margin:0;"></div>
+                    <div><label style="font-size:11px; display:block; margin-bottom:3px;">To</label><input type="date" id="rp-to" onchange="rpSetDates()" style="margin:0;"></div>
+                </div>
+                <div style="display:flex; gap:6px; flex-wrap:wrap;">
+                    <button onclick="rpQuick('today')" style="flex:1; padding:7px; font-size:12px; font-weight:700; border:1.5px solid var(--border); border-radius:8px; background:white; color:var(--text);">Today</button>
+                    <button onclick="rpQuick('7')" style="flex:1; padding:7px; font-size:12px; font-weight:700; border:1.5px solid var(--border); border-radius:8px; background:white; color:var(--text);">7 days</button>
+                    <button onclick="rpQuick('month')" style="flex:1; padding:7px; font-size:12px; font-weight:700; border:1.5px solid var(--border); border-radius:8px; background:white; color:var(--text);">This month</button>
+                    <button onclick="rpQuick('last')" style="flex:1; padding:7px; font-size:12px; font-weight:700; border:1.5px solid var(--border); border-radius:8px; background:white; color:var(--text);">Last month</button>
+                </div>
+            </div>
+            <div id="rp-body"></div>
+            <div style="background:var(--surface); border-radius:var(--radius); padding:14px; box-shadow:0 1px 6px rgba(0,0,0,.06); margin-bottom:12px;">
+                <div style="font-size:10px; font-weight:700; letter-spacing:.08em; color:var(--text2); text-transform:uppercase; margin-bottom:10px;">Data</div>
+                <button onclick="rpExportCsv()" style="width:100%; padding:10px; font-size:13px; font-weight:700; border:1.5px solid var(--border); border-radius:10px; background:white; color:var(--text); margin-bottom:12px;">⬇ Export this period (CSV)</button>
+                <label style="font-size:11px; display:block; margin-bottom:3px;">Delete everything before</label>
+                <input type="date" id="rp-del-date" style="margin:0 0 8px;">
+                <div style="display:flex; gap:8px;">
+                    <button onclick="rpDeleteBefore('cashbook')" style="flex:1; padding:10px; font-size:12px; font-weight:700; border:1.5px solid #C62828; border-radius:10px; background:white; color:#C62828;">Delete cash book</button>
+                    <button onclick="rpDeleteBefore('sales')" style="flex:1; padding:10px; font-size:12px; font-weight:700; border:1.5px solid #C62828; border-radius:10px; background:white; color:#C62828;">Delete sales</button>
+                </div>
+                <p class="note" style="margin:8px 0 0;">A backup file downloads first. This only affects the Purchase Manager — the POS is never touched, and clearing the POS never affects this data.</p>
+            </div>
+        </div>
+
         <div id="pm-pane-purchase" style="display:none;">
             <p class="note" style="margin:0 0 12px;">Grams shown are pure (24K/999) equivalent.</p>
 
@@ -214,6 +243,8 @@
                 <button onclick="openPurchaseModal(null)" style="flex:1; padding:13px; background:var(--gold); color:white; border:none; border-radius:12px; font-size:14px; font-weight:800;">🛒 Purchase</button>
                 <button onclick="openPaymentModal()" style="flex:1; padding:13px; background:#1a1a1a; color:white; border:none; border-radius:12px; font-size:14px; font-weight:800;">💳 Payment</button>
             </div>
+
+            <div id="piece-supplies-card"></div>
 
             <div style="display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:12px; background:var(--surface); border-radius:var(--radius); padding:10px 14px; box-shadow:0 1px 6px rgba(0,0,0,.06);">
                 <label for="hedge-sales-start-date" style="font-size:11px; color:var(--text2); font-weight:700;">Count sales since</label>
@@ -290,6 +321,29 @@
             style="width:100%; padding:14px; background:var(--gold); color:white; border:none; border-radius:12px; font-size:16px; font-weight:800;">
             ✓ Save Purchase
         </button>
+    </div>
+</div>
+
+<div id="piece-bill-modal">
+    <div id="piece-bill-panel">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
+            <h3 style="margin:0; font-size:18px; color:#1a1a1a;">Per-piece Supplies Bill</h3>
+            <button onclick="closePieceBillModal()" style="background:none; border:none; font-size:22px; color:#aaa; padding:0; width:auto; box-shadow:none; margin:0;">✕</button>
+        </div>
+        <p class="note" style="margin-bottom:14px;">Items bought by the piece on credit. This never affects metal balances — payments made from the POS ledger reduce it.</p>
+        <label style="font-size:12px; font-weight:700; color:#888; margin:0 0 4px 0;">SUPPLIER</label>
+        <select id="piece-bill-party" style="padding:10px 12px; border:1.5px solid #e0e0e0; border-radius:10px; width:100%; font-size:14px; margin-bottom:14px; box-sizing:border-box;"></select>
+        <label style="font-size:12px; font-weight:700; color:#888; margin:0 0 4px 0;">ITEM / DESCRIPTION</label>
+        <input type="text" id="piece-bill-desc" placeholder="e.g. Boxes, tags" style="padding:10px 12px; border:1.5px solid #e0e0e0; border-radius:10px; width:100%; font-size:14px; margin-bottom:14px; box-sizing:border-box;">
+        <div style="display:flex; gap:8px;">
+            <div style="flex:1;"><label style="font-size:12px; font-weight:700; color:#888; margin:0 0 4px 0;">QTY (optional)</label>
+            <input type="number" id="piece-bill-qty" min="0" step="1" style="padding:10px 12px; border:1.5px solid #e0e0e0; border-radius:10px; width:100%; font-size:14px; margin-bottom:14px; box-sizing:border-box;"></div>
+            <div style="flex:1;"><label style="font-size:12px; font-weight:700; color:#888; margin:0 0 4px 0;">BILL AMOUNT (₹)</label>
+            <input type="number" id="piece-bill-amount" min="0" step="1" style="padding:10px 12px; border:1.5px solid #e0e0e0; border-radius:10px; width:100%; font-size:14px; margin-bottom:14px; box-sizing:border-box;"></div>
+        </div>
+        <label style="font-size:12px; font-weight:700; color:#888; margin:0 0 4px 0;">DATE</label>
+        <input type="date" id="piece-bill-date" style="padding:10px 12px; border:1.5px solid #e0e0e0; border-radius:10px; width:100%; font-size:14px; margin-bottom:16px; box-sizing:border-box;">
+        <button onclick="savePieceBill()" style="width:100%; padding:14px; background:var(--gold); color:white; border:none; border-radius:12px; font-size:16px; font-weight:800;">✓ Save Bill</button>
     </div>
 </div>
 
@@ -422,13 +476,20 @@
     let _pmTapCount = 0, _pmTapTimer = null;
     function _pmRerenderActiveTab(){
         if (_pmActiveTab === 'sales') renderSalesReport();
+        else if (_pmActiveTab === 'report') renderReportTab();
         else renderPurchaseTab();
+    }
+    function _pmApplyTrackUi(){
+        const rt = document.getElementById('pm-tab-report');
+        if (rt) rt.style.display = currentInvTrack === 'B' ? 'flex' : 'none';   // Report: Track B only
+        if (currentInvTrack !== 'B' && _pmActiveTab === 'report') pmSwitchTab('purchase');
     }
     function pmHandleBrandTap() {
         if (currentInvTrack === 'B') {
             currentInvTrack = 'A';
             document.getElementById('pm-track-pill').style.display = 'none';
             invToast('🔒 Track A');
+            _pmApplyTrackUi();
             _pmRerenderActiveTab();
             return;
         }
@@ -441,6 +502,7 @@
             currentInvTrack = 'B';
             document.getElementById('pm-track-pill').style.display = 'block';
             invToast('🔓 Track B');
+            _pmApplyTrackUi();
             _pmRerenderActiveTab();
         }
     }
@@ -477,10 +539,23 @@
             _pmRerenderActiveTab();
         }, err => console.error('[Products] read error', err));
 
-        window.dbOnValue(window.dbRef(window.firebaseDB, 'jewelryData/invoiceHistory'), snap => {
+        // The Purchase Manager keeps its OWN copy of invoices (pmSales), written by
+        // the POS at save time — so clearing invoices in the POS never affects it.
+        window.dbOnValue(window.dbRef(window.firebaseDB, 'pmSales'), snap => {
             invoiceHistory = _objToArraySimple(snap.val());
+            pmMaybeImportSales();
             _pmRerenderActiveTab();
-        }, err => console.error('[InvoiceHistory] read error', err));
+        }, err => console.error('[PmSales] read error', err));
+
+        window.dbOnValue(window.dbRef(window.firebaseDB, 'cashbook'), snap => {
+            cashbook = _objToArraySimple(snap.val());
+            _pmRerenderActiveTab();
+        }, err => console.error('[Cashbook] read error', err));
+
+        window.dbOnValue(window.dbRef(window.firebaseDB, 'pieceSupplies'), snap => {
+            pieceSupplies = _objToArraySimple(snap.val());
+            _pmRerenderActiveTab();
+        }, err => console.error('[PieceSupplies] read error', err));
 
         window.dbOnValue(window.dbRef(window.firebaseDB, 'installments'), snap => {
             installmentPlans = _objToArraySimple(snap.val());
@@ -873,6 +948,7 @@ function computeCombinedAvgRate(metal){
 
     // ── Main Purchase tab render ──
     function renderPurchaseTab(){
+        renderPieceSupplies();
         const dateFieldEl = document.getElementById('hedge-sales-start-date');
         if (dateFieldEl && document.activeElement !== dateFieldEl) {
             dateFieldEl.value = getSalesHedgeStartDate(currentInvTrack).toISOString().slice(0, 10);
@@ -1415,16 +1491,393 @@ function computeCombinedAvgRate(metal){
         });
     }
 
+    // ═══════════════════════════════════════════════════════════
+    // REPORT + PER-PIECE SUPPLIES (Track B only)
+    // Reads cashbook/{id} (written by POS, independent of POS ledger clears),
+    // pmSales (own copy of invoices), pieceSupplies, parties/purchases/payments.
+    // ═══════════════════════════════════════════════════════════
+    let cashbook = [], pieceSupplies = [];
+    const _rpOpen = {};
+    const _rpRange = { from: '', to: '' };
+    let _pieceOpen = {};
+
+    function _rpFmt(n){ return '₹' + Math.round(n || 0).toLocaleString('en-IN'); }
+    function _rpEsc(t){ return String(t == null ? '' : t).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+    function _rpDate(d){ return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0'); }
+    function _rpEnc(k){ return encodeURIComponent(k).replace(/'/g, '%27'); }
+    function _rpShort(ds){ const d = new Date(ds + 'T12:00:00'); return d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short' }); }
+    const _cardCss = 'background:var(--surface); border-radius:var(--radius); padding:14px; box-shadow:0 1px 6px rgba(0,0,0,.06); margin-bottom:12px;';
+    const _hdCss = 'font-size:10px; font-weight:700; letter-spacing:.08em; color:var(--text2); text-transform:uppercase; margin-bottom:10px;';
+
+    // ── Per-piece supplies (credit) card in the Purchase tab ──
+    function renderPieceSupplies(){
+        const el = document.getElementById('piece-supplies-card'); if (!el) return;
+        const recs = pieceSupplies.slice();
+        const byParty = {};
+        recs.forEach(r => { (byParty[r.partyId] = byParty[r.partyId] || []).push(r); });
+        const rows = Object.keys(byParty).map(pid => {
+            const list = byParty[pid].slice().sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+            const bal = list.reduce((s, r) => s + (r.kind === 'payment' ? -(r.amount || 0) : (r.amount || 0)), 0);
+            return { pid, list, bal };
+        }).sort((a, b) => b.bal - a.bal);
+        let html = `<div style="${_cardCss}">
+            <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:10px;">
+                <div style="${_hdCss} margin:0;">🧩 Per-piece supplies (credit)</div>
+                <button onclick="openPieceBillModal()" style="width:auto; margin:0; padding:7px 12px; font-size:12px; font-weight:800; background:var(--gold); color:white; border:none; border-radius:10px;">＋ Bill</button>
+            </div>`;
+        if (!rows.length) html += '<div style="font-size:12px; color:var(--text2);">No per-piece bills yet. Payments made from the POS ledger appear here automatically.</div>';
+        rows.forEach(r => {
+            const open = !!_pieceOpen[r.pid];
+            html += `<div onclick="_pieceToggle('${_rpEnc(r.pid)}')" style="display:flex; justify-content:space-between; align-items:center; padding:9px 0; border-top:1px solid var(--border); cursor:pointer; user-select:none;">
+                <div style="font-size:13px; font-weight:700;"><span style="font-size:11px; color:var(--text2); margin-right:6px;">${open ? '▾' : '▸'}</span>${_rpEsc(getPartyName(r.pid))}</div>
+                <div style="font-size:13px; font-weight:800; color:${r.bal > 0.5 ? '#C62828' : '#2E7D32'};">${r.bal > 0.5 ? _rpFmt(r.bal) + ' due' : 'Settled'}</div>
+            </div>`;
+            if (open) {
+                html += r.list.map(x => `<div style="display:flex; justify-content:space-between; align-items:center; gap:8px; font-size:12px; padding:5px 0 5px 18px; color:var(--text2);">
+                    <div style="flex:1;">${_rpShort(x.date || (x.createdAt || '').slice(0,10))} · ${x.kind === 'payment' ? 'Paid' : 'Bill'}${x.desc ? ' · ' + _rpEsc(x.desc) : ''}${x.qty ? ' · ' + x.qty + ' pc' : ''}</div>
+                    <div style="font-weight:700; color:${x.kind === 'payment' ? '#2E7D32' : '#C62828'};">${x.kind === 'payment' ? '−' : '+'}${_rpFmt(x.amount)}</div>
+                    ${x.source === 'pos' ? '' : `<button onclick="event.stopPropagation(); deletePieceRecord('${_rpEnc(x.id)}')" style="width:auto; margin:0; padding:2px 8px; font-size:12px; background:none; border:none; color:#C62828; box-shadow:none;">✕</button>`}
+                </div>`).join('');
+            }
+        });
+        el.innerHTML = html + '</div>';
+    }
+    function _pieceToggle(enc){ const k = decodeURIComponent(enc); _pieceOpen[k] = !_pieceOpen[k]; renderPieceSupplies(); }
+    function openPieceBillModal(){
+        const sel = document.getElementById('piece-bill-party');
+        sel.innerHTML = '<option value="">— Select supplier —</option>' + parties.map(p => `<option value="${_rpEsc(p.id)}">${_rpEsc(p.name)}</option>`).join('');
+        ['piece-bill-desc','piece-bill-qty','piece-bill-amount'].forEach(id => { document.getElementById(id).value = ''; });
+        document.getElementById('piece-bill-date').value = _rpDate(new Date());
+        document.getElementById('piece-bill-modal').classList.add('show');
+    }
+    function closePieceBillModal(){ document.getElementById('piece-bill-modal').classList.remove('show'); }
+    async function savePieceBill(){
+        const partyId = document.getElementById('piece-bill-party').value;
+        const desc = (document.getElementById('piece-bill-desc').value || '').trim();
+        const qty = parseFloat(document.getElementById('piece-bill-qty').value) || 0;
+        const amount = parseFloat(document.getElementById('piece-bill-amount').value) || 0;
+        const date = document.getElementById('piece-bill-date').value || _rpDate(new Date());
+        if (!partyId) { showCustomAlert('Select a supplier.'); return; }
+        if (!(amount > 0)) { showCustomAlert('Enter the bill amount.'); return; }
+        const id = crypto.randomUUID();
+        const rec = { id, partyId, track: currentInvTrack, kind: 'bill', desc, qty, amount, date, createdAt: new Date(date + 'T12:00:00.000Z').toISOString(), source: 'pm' };
+        try {
+            await window.dbUpdate(window.dbRef(window.firebaseDB, 'pieceSupplies'), { [id]: rec });
+            closePieceBillModal(); invToast('✅ Bill saved');
+        } catch (e) { console.error(e); showCustomAlert(window._writeAllowed ? 'Could not save — try again.' : 'Writes are disabled — read-only copy.'); }
+    }
+    function deletePieceRecord(enc){
+        const id = decodeURIComponent(enc);
+        showCustomConfirm('Delete this per-piece record?', 'Delete', async () => {
+            try { await window.dbUpdate(window.dbRef(window.firebaseDB, 'pieceSupplies'), { [id]: null }); } catch (e) { console.error(e); }
+        });
+    }
+
+    // ── Report ──
+    function rpInitDates(){
+        if (_rpRange.from) return;
+        const now = new Date();
+        _rpRange.from = _rpDate(new Date(now.getFullYear(), now.getMonth(), 1));
+        _rpRange.to = _rpDate(now);
+        document.getElementById('rp-from').value = _rpRange.from;
+        document.getElementById('rp-to').value = _rpRange.to;
+    }
+    function rpSetDates(){
+        _rpRange.from = document.getElementById('rp-from').value;
+        _rpRange.to = document.getElementById('rp-to').value;
+        renderReportTab();
+    }
+    function rpQuick(k){
+        const now = new Date(); let f, t = now;
+        if (k === 'month') f = new Date(now.getFullYear(), now.getMonth(), 1);
+        else if (k === 'last') { f = new Date(now.getFullYear(), now.getMonth() - 1, 1); t = new Date(now.getFullYear(), now.getMonth(), 0); }
+        else if (k === '7') f = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 6);
+        else if (k === '30') f = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 29);
+        else f = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+        _rpRange.from = _rpDate(f); _rpRange.to = _rpDate(t);
+        document.getElementById('rp-from').value = _rpRange.from;
+        document.getElementById('rp-to').value = _rpRange.to;
+        renderReportTab();
+    }
+    function rpToggle(enc){ const k = decodeURIComponent(enc); _rpOpen[k] = !_rpOpen[k]; renderReportTab(); }
+
+    function _rpSplit(e){
+        let cash;
+        if (e.cashPortion !== undefined) cash = e.cashPortion;
+        else cash = (e.mode === 'upi') ? 0 : (e.amount || 0);
+        cash = Math.max(0, Math.min(e.amount || 0, cash));
+        return { cash, dig: (e.amount || 0) - cash };
+    }
+    // Turns cash book entries into { dir, group, account } rows
+    function _rpClassify(e){
+        if (e.type === 'sale') {
+            const src = e.source === 'installment' ? 'Installment collections' : e.source === 'credit' ? 'Credit collections' : 'Sales';
+            return { dir: 'in', group: src, account: 'All receipts' };
+        }
+        if (e.type === 'out') return { dir: 'out', group: 'Customer refunds', account: 'Refunds' };
+        if (e.type === 'in') return { dir: 'in', group: e.categoryName || 'Other income', account: e.accountName || 'Unassigned' };
+        const isSup = e.categoryId === 'cat_supplier' || !!e.supplier;
+        return { dir: 'out', group: e.categoryName || (isSup ? 'Supplier' : 'Unassigned'), account: (isSup && e.supplier && e.supplier.partyName) ? e.supplier.partyName : (e.accountName || 'Unassigned') };
+    }
+    function _rpTrackOk(t){ return t === 'B'; }   // Report is Track B data only
+    function _rpEntries(from, to){ return cashbook.filter(e => _rpTrackOk(e.track || 'A') && e.date >= from && e.date <= to); }
+    function _rpTotals(entries){
+        const t = { in: 0, out: 0, inCash: 0, inDig: 0, outCash: 0, outDig: 0 };
+        entries.forEach(e => {
+            const c = _rpClassify(e), sp = _rpSplit(e);
+            if (c.dir === 'in') { t.in += e.amount || 0; t.inCash += sp.cash; t.inDig += sp.dig; }
+            else { t.out += e.amount || 0; t.outCash += sp.cash; t.outDig += sp.dig; }
+        });
+        return t;
+    }
+    function _rpDelta(cur, prev){
+        if (!prev) return cur ? '<span style="color:var(--text2);">new</span>' : '';
+        const pct = ((cur - prev) / prev) * 100;
+        return `<span style="color:${pct >= 0 ? '#2E7D32' : '#C62828'};">${pct >= 0 ? '▲' : '▼'} ${Math.abs(pct).toFixed(0)}%</span>`;
+    }
+
+    function renderReportTab(){
+        const body = document.getElementById('rp-body'); if (!body) return;
+        if (currentInvTrack !== 'B') { body.innerHTML = ''; return; }
+        rpInitDates();
+        const from = _rpRange.from, to = _rpRange.to;
+        if (!from || !to || from > to) { body.innerHTML = '<div class="note">Pick a valid date range.</div>'; return; }
+        const entries = _rpEntries(from, to);
+        const T = _rpTotals(entries);
+        const net = T.in - T.out;
+        const days = Math.max(1, Math.round((new Date(to + 'T12:00:00') - new Date(from + 'T12:00:00')) / 86400000) + 1);
+        const prevTo = _rpDate(new Date(new Date(from + 'T12:00:00').getTime() - 86400000));
+        const prevFrom = _rpDate(new Date(new Date(prevTo + 'T12:00:00').getTime() - (days - 1) * 86400000));
+        const P = _rpTotals(_rpEntries(prevFrom, prevTo));
+
+        // group tree
+        const tree = { in: {}, out: {} };
+        entries.forEach(e => {
+            const c = _rpClassify(e);
+            const g = (tree[c.dir][c.group] = tree[c.dir][c.group] || { total: 0, accts: {} });
+            const a = (g.accts[c.account] = g.accts[c.account] || { total: 0, list: [] });
+            g.total += e.amount || 0; a.total += e.amount || 0; a.list.push(e);
+        });
+
+        let html = '';
+        if (!entries.length) html += `<div style="${_cardCss} font-size:12px; color:var(--text2);">No cash book entries in this range.</div>`;
+
+        // 1. Summary
+        html += `<div style="${_cardCss}">
+            <div style="${_hdCss}">Summary · ${_rpShort(from)} – ${_rpShort(to)} (${days} day${days > 1 ? 's' : ''})</div>
+            <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:8px; text-align:center;">
+                <div><div style="font-size:17px; font-weight:800; color:#2E7D32;">${_rpFmt(T.in)}</div><div style="font-size:11px; color:var(--text2);">Money in</div></div>
+                <div><div style="font-size:17px; font-weight:800; color:#C62828;">${_rpFmt(T.out)}</div><div style="font-size:11px; color:var(--text2);">Money out</div></div>
+                <div><div style="font-size:17px; font-weight:800; color:${net >= 0 ? '#2E7D32' : '#C62828'};">${net < 0 ? '−' : ''}${_rpFmt(Math.abs(net))}</div><div style="font-size:11px; color:var(--text2);">Net</div></div>
+            </div>
+            <div style="font-size:11px; color:var(--text2); margin-top:10px; line-height:1.6;">
+                In: cash ${_rpFmt(T.inCash)} · UPI/card ${_rpFmt(T.inDig)}<br>
+                Out: cash ${_rpFmt(T.outCash)} · UPI/card ${_rpFmt(T.outDig)}
+            </div>
+            <div style="font-size:11px; color:var(--text2); margin-top:8px; border-top:1px solid var(--border); padding-top:8px; line-height:1.6;">
+                vs previous ${days} day${days > 1 ? 's' : ''} (${_rpShort(prevFrom)} – ${_rpShort(prevTo)}):
+                in ${_rpDelta(T.in, P.in)} · out ${_rpDelta(T.out, P.out)} · net ${_rpFmt(P.in - P.out)} before
+            </div>
+        </div>`;
+
+        // 2. Money flow
+        const supOut = (tree.out['Supplier'] || {}).total || 0;
+        const refunds = (tree.out['Customer refunds'] || {}).total || 0;
+        const otherOut = Math.max(0, T.out - supOut - refunds);
+        const flow = [
+            ['Received', T.in, '#2E7D32'],
+            ['Suppliers', supOut, '#1565C0'],
+            ['Expenses & other', otherOut, '#E65100'],
+            ['Customer refunds', refunds, '#8E24AA'],
+            [net >= 0 ? 'Left over' : 'Shortfall', Math.abs(net), net >= 0 ? '#2E7D32' : '#C62828']
+        ];
+        const fmax = Math.max(1, T.in, T.out);
+        html += `<div style="${_cardCss}"><div style="${_hdCss}">Where the money went</div>` + flow.map(f => `
+            <div style="margin-bottom:8px;"><div style="display:flex; justify-content:space-between; font-size:12px; margin-bottom:3px;"><span>${f[0]}</span><b>${_rpFmt(f[1])}</b></div>
+            <div style="height:8px; background:var(--border); border-radius:4px; overflow:hidden;"><div style="height:100%; width:${Math.min(100, f[1] / fmax * 100)}%; background:${f[2]};"></div></div></div>`).join('') + '</div>';
+
+        // 3. Breakdown trees (out, then in)
+        const treeCard = (dir, title) => {
+            const groups = Object.keys(tree[dir]).sort((a, b) => tree[dir][b].total - tree[dir][a].total);
+            if (!groups.length) return '';
+            const total = dir === 'in' ? T.in : T.out;
+            let h = `<div style="${_cardCss}"><div style="${_hdCss}">${title}</div>`;
+            groups.forEach(g => {
+                const gk = 'g|' + dir + '|' + g, gOpen = !!_rpOpen[gk], G = tree[dir][g];
+                h += `<div onclick="rpToggle('${_rpEnc(gk)}')" style="padding:9px 0; border-top:1px solid var(--border); cursor:pointer; user-select:none;">
+                    <div style="display:flex; justify-content:space-between; font-size:13px; font-weight:700;"><span><span style="font-size:11px; color:var(--text2); margin-right:6px;">${gOpen ? '▾' : '▸'}</span>${_rpEsc(g)}</span><span>${_rpFmt(G.total)} <span style="font-size:11px; color:var(--text2); font-weight:600;">${total ? (G.total / total * 100).toFixed(0) : 0}%</span></span></div>
+                    <div style="height:5px; background:var(--border); border-radius:3px; margin-top:5px; overflow:hidden;"><div style="height:100%; width:${total ? G.total / total * 100 : 0}%; background:${dir === 'in' ? '#2E7D32' : 'var(--gold)'};"></div></div>
+                </div>`;
+                if (gOpen) {
+                    Object.keys(G.accts).sort((a, b) => G.accts[b].total - G.accts[a].total).forEach(an => {
+                        const ak = 'a|' + dir + '|' + g + '|' + an, aOpen = !!_rpOpen[ak], A = G.accts[an];
+                        h += `<div onclick="rpToggle('${_rpEnc(ak)}')" style="display:flex; justify-content:space-between; font-size:12px; padding:6px 0 6px 18px; cursor:pointer; user-select:none;"><span><span style="font-size:10px; color:var(--text2); margin-right:5px;">${aOpen ? '▾' : '▸'}</span>${_rpEsc(an)}</span><b>${_rpFmt(A.total)}</b></div>`;
+                        if (aOpen) {
+                            h += A.list.slice().sort((x, y) => new Date(y.ts) - new Date(x.ts)).map(e => `<div style="display:flex; justify-content:space-between; gap:8px; font-size:11px; color:var(--text2); padding:3px 0 3px 36px;"><span style="flex:1;">${_rpShort(e.date)}${e.mode === 'upi' ? ' · UPI' : ''}${e.note ? ' · ' + _rpEsc(e.note) : ''}</span><span>${_rpFmt(e.amount)}</span></div>`).join('');
+                        }
+                    });
+                }
+            });
+            return h + '</div>';
+        };
+        html += treeCard('out', 'Money out — by category');
+        html += treeCard('in', 'Money in — by source');
+
+        // 4. Suppliers
+        const sup = {};
+        entries.forEach(e => {
+            if (!(e.categoryId === 'cat_supplier' || e.supplier) || e.type !== 'expense') return;
+            const pid = (e.supplier && e.supplier.partyId) || ('acct:' + (e.accountName || ''));
+            const s = (sup[pid] = sup[pid] || { name: (e.supplier && e.supplier.partyName) || e.accountName || 'Unknown', paid: 0, Gold: { g: 0, v: 0 }, Silver: { g: 0, v: 0 }, piece: 0, disc: 0, round: 0, real: !!(e.supplier && e.supplier.partyId) });
+            s.paid += e.amount || 0;
+            const x = e.supplier || {};
+            if (x.kind === 'metal' && s[x.metal]) { s[x.metal].g += x.weight || 0; s[x.metal].v += (x.weight || 0) * (x.rate || 0); }
+            else if (x.kind === 'piece') s.piece += e.amount || 0;
+            if ((x.adjustment || 0) > 0) s.disc += x.adjustment; else if ((x.adjustment || 0) < 0) s.round += -x.adjustment;
+            if (x.partyId) s.pid = x.partyId;
+        });
+        const supIds = Object.keys(sup).sort((a, b) => sup[b].paid - sup[a].paid);
+        if (supIds.length) {
+            let h = `<div style="${_cardCss}"><div style="${_hdCss}">Suppliers — paid in this period</div>`;
+            supIds.forEach(id => {
+                const s = sup[id]; const lines = [];
+                ['Gold', 'Silver'].forEach(m => { if (s[m].g > 0) lines.push(`${m}: ${s[m].g.toFixed(2)}g @ avg ₹${(s[m].v / s[m].g).toFixed(0)}/g`); });
+                if (s.piece > 0) lines.push('Per-piece: ' + _rpFmt(s.piece));
+                if (s.disc > 0) lines.push('Discount got: ' + _rpFmt(s.disc));
+                if (s.round > 0) lines.push('Round-off / extra: ' + _rpFmt(s.round));
+                const due = [];
+                if (s.pid) {
+                    ['Gold', 'Silver'].forEach(m => { const b = getPartyCreditBalance(s.pid, 'A', m) + getPartyCreditBalance(s.pid, 'B', m); if (b > 0.005) due.push(b.toFixed(2) + 'g ' + m); });
+                    const pb = pieceSupplies.filter(r => r.partyId === s.pid).reduce((a, r) => a + (r.kind === 'payment' ? -(r.amount || 0) : (r.amount || 0)), 0);
+                    if (pb > 0.5) due.push(_rpFmt(pb));
+                }
+                h += `<div style="padding:9px 0; border-top:1px solid var(--border);">
+                    <div style="display:flex; justify-content:space-between; font-size:13px; font-weight:700;"><span>${_rpEsc(s.name)}</span><span>${_rpFmt(s.paid)}</span></div>
+                    <div style="font-size:11px; color:var(--text2); line-height:1.6; margin-top:2px;">${lines.join(' · ') || '—'}</div>
+                    ${s.pid ? `<div style="font-size:11px; margin-top:2px; color:${due.length ? '#C62828' : '#2E7D32'};">Still owed now: ${due.length ? due.join(' + ') : 'nothing'}</div>` : ''}
+                </div>`;
+            });
+            html += h + '</div>';
+        }
+
+        // 5. Expenses highlights
+        const expAccts = [];
+        Object.keys(tree.out).forEach(g => { if (g === 'Supplier' || g === 'Customer refunds') return; Object.keys(tree.out[g].accts).forEach(a => expAccts.push({ name: a, group: g, total: tree.out[g].accts[a].total })); });
+        expAccts.sort((a, b) => b.total - a.total);
+        if (expAccts.length) {
+            const expTotal = expAccts.reduce((s, x) => s + x.total, 0);
+            html += `<div style="${_cardCss}"><div style="${_hdCss}">Expenses — top accounts</div>
+                <div style="font-size:12px; color:var(--text2); margin-bottom:6px;">Total ${_rpFmt(expTotal)} · ${_rpFmt(expTotal / days)} per day</div>` +
+                expAccts.slice(0, 5).map(x => `<div style="display:flex; justify-content:space-between; font-size:13px; padding:5px 0; border-top:1px solid var(--border);"><span>${_rpEsc(x.name)} <span style="font-size:11px; color:var(--text2);">${_rpEsc(x.group)}</span></span><b>${_rpFmt(x.total)}</b></div>`).join('') + '</div>';
+        }
+
+        // 6. Trend
+        if (entries.length) {
+            const monthly = days > 120;
+            const buckets = {};
+            entries.forEach(e => {
+                const c = _rpClassify(e);
+                const key = monthly ? e.date.slice(0, 7) : String(Math.floor((new Date(e.date + 'T12:00:00') - new Date(from + 'T12:00:00')) / (7 * 86400000)));
+                const b = (buckets[key] = buckets[key] || { in: 0, out: 0, label: monthly ? new Date(e.date + 'T12:00:00').toLocaleDateString('en-IN', { month: 'short', year: '2-digit' }) : '' });
+                b[c.dir] += e.amount || 0;
+            });
+            const keys = Object.keys(buckets).sort((a, b) => monthly ? a.localeCompare(b) : (a - b));
+            const bmax = Math.max(1, ...keys.map(k => Math.max(buckets[k].in, buckets[k].out)));
+            html += `<div style="${_cardCss}"><div style="${_hdCss}">${monthly ? 'Monthly' : 'Weekly'} trend</div>` + keys.map(k => {
+                const b = buckets[k];
+                const label = monthly ? b.label : 'Wk of ' + _rpShort(_rpDate(new Date(new Date(from + 'T12:00:00').getTime() + k * 7 * 86400000)));
+                return `<div style="margin-bottom:8px;"><div style="font-size:11px; color:var(--text2); margin-bottom:2px;">${label}</div>
+                    <div style="display:flex; align-items:center; gap:6px; font-size:11px;"><div style="height:7px; width:${b.in / bmax * 70}%; min-width:2px; background:#2E7D32; border-radius:3px;"></div>${_rpFmt(b.in)}</div>
+                    <div style="display:flex; align-items:center; gap:6px; font-size:11px; margin-top:2px;"><div style="height:7px; width:${b.out / bmax * 70}%; min-width:2px; background:#C62828; border-radius:3px;"></div>${_rpFmt(b.out)}</div></div>`;
+            }).join('') + '<div style="font-size:10px; color:var(--text2);"><span style="color:#2E7D32;">■</span> in &nbsp; <span style="color:#C62828;">■</span> out</div></div>';
+        }
+
+        // 7. Metal position
+        const sold = { Gold: 0, Silver: 0 };
+        invoiceHistory.forEach(inv => {
+            if (inv.draft || !_rpTrackOk(inv.track)) return;
+            const d = _rpDate(new Date(inv.timestamp)); if (d < from || d > to) return;
+            (inv.items || []).forEach(it => { const mw = getInvoiceItemPureGrams(it); if (mw && sold[mw.metal] !== undefined) sold[mw.metal] += mw.weight; });
+        });
+        const inRange = r => { const d = r.date || (r.createdAt || '').slice(0, 10); return d >= from && d <= to; };
+        const bought = { Gold: 0, Silver: 0 }, paidG = { Gold: 0, Silver: 0 };
+        purchases.forEach(p => { if (_rpTrackOk(p.track) && inRange(p) && bought[p.metal] !== undefined) bought[p.metal] += p.weight || 0; });
+        payments.forEach(p => { if (_rpTrackOk(p.track) && inRange(p) && paidG[p.metal] !== undefined) paidG[p.metal] += p.weight || 0; });
+        html += `<div style="${_cardCss}"><div style="${_hdCss}">Metal position (pure grams)</div>` + ['Gold', 'Silver'].map(m => `
+            <div style="display:flex; justify-content:space-between; font-size:12px; padding:6px 0; border-top:1px solid var(--border);">
+                <b>${m}</b><span>Sold ${sold[m].toFixed(2)}g · Bought ${bought[m].toFixed(2)}g · Paid to suppliers ${paidG[m].toFixed(2)}g</span></div>`).join('') + '</div>';
+
+        body.innerHTML = html;
+    }
+
+    function rpExportCsv(){
+        const rows = _rpEntries(_rpRange.from, _rpRange.to).sort((a, b) => new Date(a.ts) - new Date(b.ts));
+        if (!rows.length) { showCustomAlert('Nothing to export in this range.'); return; }
+        const q = v => '"' + String(v == null ? '' : v).replace(/"/g, '""') + '"';
+        const lines = [['Date','Direction','Category','Account / Party','Mode','Amount','Note'].map(q).join(',')];
+        rows.forEach(e => { const c = _rpClassify(e); lines.push([e.date, c.dir === 'in' ? 'In' : 'Out', c.group, c.account, e.mode || (e.cashPortion !== undefined && e.cashPortion < e.amount ? 'mixed' : 'cash'), e.amount, e.note || ''].map(q).join(',')); });
+        _rpDownload('report_' + _rpRange.from + '_to_' + _rpRange.to + '.csv', lines.join('\n'), 'text/csv');
+    }
+    function _rpDownload(name, text, type){
+        const blob = new Blob([text], { type: type || 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a'); a.href = url; a.download = name;
+        document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
+    }
+    // Purchase Manager's own cleanup — independent of anything cleared in the POS.
+    function rpDeleteBefore(kind){
+        const d = document.getElementById('rp-del-date').value;
+        if (!d) { showCustomAlert('Pick the cut-off date first. Everything BEFORE it will be deleted.'); return; }
+        const list = kind === 'cashbook'
+            ? cashbook.filter(e => e.date < d)
+            : invoiceHistory.filter(i => _rpDate(new Date(i.timestamp)) < d);
+        if (!list.length) { showCustomAlert('Nothing found before ' + d + '.'); return; }
+        _rpDownload('pm_' + kind + '_before_' + d + '.json', JSON.stringify(list, null, 2));
+        showCustomConfirm('A backup file was just downloaded. Delete <b>' + list.length + '</b> ' + (kind === 'cashbook' ? 'cash book entries' : 'invoices') + ' dated before <b>' + d + '</b> from the Purchase Manager? This does not touch the POS and cannot be undone.', 'Confirm delete', async () => {
+            const node = kind === 'cashbook' ? 'cashbook' : 'pmSales';
+            try {
+                for (let i = 0; i < list.length; i += 200) {
+                    const upd = {}; list.slice(i, i + 200).forEach(x => { upd[node + '/' + x.id] = null; });
+                    await window.dbUpdate(window.dbRef(window.firebaseDB, '/'), upd);
+                }
+                invToast('✅ Deleted ' + list.length);
+            } catch (e) { console.error(e); showCustomAlert('Delete failed — try again.'); }
+        });
+    }
+
+    // One-time: seed pmSales from the POS invoice history so nothing disappears
+    let _pmSalesImportChecked = false;
+    async function pmMaybeImportSales(){
+        if (_pmSalesImportChecked) return;
+        _pmSalesImportChecked = true;
+        try {
+            const meta = await window.dbGet(window.dbRef(window.firebaseDB, 'pmMeta/salesImported'));
+            if (meta.val() === true || !window._writeAllowed) return;
+            const src = await window.dbGet(window.dbRef(window.firebaseDB, 'jewelryData/invoiceHistory'));
+            const have = new Set(invoiceHistory.map(i => i.id));
+            const all = Object.values(src.val() || {}).filter(i => i && i.id && !have.has(i.id));
+            for (let i = 0; i < all.length; i += 100) {
+                const upd = {}; all.slice(i, i + 100).forEach(x => { upd['pmSales/' + x.id] = x; });
+                await window.dbUpdate(window.dbRef(window.firebaseDB, '/'), upd);
+            }
+            await window.dbUpdate(window.dbRef(window.firebaseDB, '/'), { 'pmMeta/salesImported': true });
+            console.log('[PM] imported', all.length, 'invoices into pmSales');
+        } catch (e) { console.error('[PM] sales import failed', e); _pmSalesImportChecked = false; }
+    }
+
     // ── Tab switcher ──
     let _pmActiveTab = 'purchase';
     function pmSwitchTab(name){
         _pmActiveTab = name;
         document.getElementById('pm-pane-sales').style.display = name === 'sales' ? '' : 'none';
         document.getElementById('pm-pane-purchase').style.display = name === 'purchase' ? '' : 'none';
+        document.getElementById('pm-pane-report').style.display = name === 'report' ? '' : 'none';
         document.getElementById('pm-tab-sales').style.color = name === 'sales' ? 'var(--gold)' : 'var(--text2)';
         document.getElementById('pm-tab-purchase').style.color = name === 'purchase' ? 'var(--gold)' : 'var(--text2)';
+        document.getElementById('pm-tab-report').style.color = name === 'report' ? 'var(--gold)' : 'var(--text2)';
         if (name === 'sales') invInitReportDates();
         if (name === 'purchase') renderPurchaseTab();
+        if (name === 'report') renderReportTab();
     }
 
     // ── Sales Report (ported from POS.html's Invoice > Report tab) ──
