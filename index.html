@@ -1512,7 +1512,8 @@ function computeCombinedAvgRate(metal){
     // ── Per-piece supplies (credit) card in the Purchase tab ──
     function renderPieceSupplies(){
         const el = document.getElementById('piece-supplies-card'); if (!el) return;
-        const recs = pieceSupplies.slice();
+        if (currentInvTrack !== 'B') { el.innerHTML = ''; return; }
+        const recs = pieceSupplies.filter(r => r.track === 'B');
         const byParty = {};
         recs.forEach(r => { (byParty[r.partyId] = byParty[r.partyId] || []).push(r); });
         const rows = Object.keys(byParty).map(pid => {
@@ -1560,7 +1561,7 @@ function computeCombinedAvgRate(metal){
         if (!partyId) { showCustomAlert('Select a supplier.'); return; }
         if (!(amount > 0)) { showCustomAlert('Enter the bill amount.'); return; }
         const id = crypto.randomUUID();
-        const rec = { id, partyId, track: currentInvTrack, kind: 'bill', desc, qty, amount, date, createdAt: new Date(date + 'T12:00:00.000Z').toISOString(), source: 'pm' };
+        const rec = { id, partyId, track: 'B', kind: 'bill', desc, qty, amount, date, createdAt: new Date(date + 'T12:00:00.000Z').toISOString(), source: 'pm' };
         try {
             await window.dbUpdate(window.dbRef(window.firebaseDB, 'pieceSupplies'), { [id]: rec });
             closePieceBillModal(); invToast('✅ Bill saved');
@@ -1747,8 +1748,8 @@ function computeCombinedAvgRate(metal){
                 if (s.round > 0) lines.push('Round-off / extra: ' + _rpFmt(s.round));
                 const due = [];
                 if (s.pid) {
-                    ['Gold', 'Silver'].forEach(m => { const b = getPartyCreditBalance(s.pid, 'A', m) + getPartyCreditBalance(s.pid, 'B', m); if (b > 0.005) due.push(b.toFixed(2) + 'g ' + m); });
-                    const pb = pieceSupplies.filter(r => r.partyId === s.pid).reduce((a, r) => a + (r.kind === 'payment' ? -(r.amount || 0) : (r.amount || 0)), 0);
+                    ['Gold', 'Silver'].forEach(m => { const b = getPartyCreditBalance(s.pid, 'B', m); if (b > 0.005) due.push(b.toFixed(2) + 'g ' + m); });
+                    const pb = pieceSupplies.filter(r => r.partyId === s.pid && r.track === 'B').reduce((a, r) => a + (r.kind === 'payment' ? -(r.amount || 0) : (r.amount || 0)), 0);
                     if (pb > 0.5) due.push(_rpFmt(pb));
                 }
                 h += `<div style="padding:9px 0; border-top:1px solid var(--border);">
