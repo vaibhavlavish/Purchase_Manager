@@ -158,6 +158,11 @@
         #pm-more-menu button:active { background: #F1F8F2; }
         #pm-more-menu button.danger { color: #C62828; }
         #pm-more-menu .sep { height: 1px; background: #eee; margin: 4px 8px; }
+        #pm-sup-full {
+            display: none; position: fixed; inset: 0; z-index: 1100; flex-direction: column;
+            background: #F7F7F5; padding-top: env(safe-area-inset-top, 0px);
+        }
+        #pm-sup-body { flex: 1; overflow-y: auto; padding: 14px; max-width: 600px; margin: 0 auto; width: 100%; box-sizing: border-box; }
         #pm-av-full {
             display: none; position: fixed; inset: 0; z-index: 1100; flex-direction: column;
             background: #F7F7F5; padding-top: env(safe-area-inset-top, 0px);
@@ -179,6 +184,28 @@
             max-height: 88vh; overflow-y: auto;
         }
         button { cursor: pointer; }
+        /* ── Purchase Manager UI refresh ── */
+        #pm-brand { padding: 12px 16px 10px !important; }
+        #pm-brand h1 { font-size: 17px !important; }
+        #pm-brand .sub { margin-top: 0 !important; }
+        #pm-more-btn { top: 6px !important; width: 36px !important; height: 36px !important; }
+        #pm-tabs > div { padding: 10px 4px !important; }
+        #pm-pane-purchase button { border-radius: 12px; }
+        #pm-pane-purchase [style*="box-shadow:0 1px 6px"], #pm-sup-body [style*="box-shadow:0 1px 6px"] { border-radius: var(--radius) !important; border: 1px solid #EDF3EE; }
+        .pm-sec { background: var(--surface); border: 1px solid #EDF3EE; border-radius: var(--radius); margin-bottom: 10px; box-shadow: 0 1px 6px rgba(0,0,0,.06); }
+        .pm-sec > summary { padding: 13px 14px; font-size: 13px; font-weight: 800; cursor: pointer; user-select: none; list-style: none; }
+        .pm-sec > summary::-webkit-details-marker { display: none; }
+        .pm-sec > summary::after { content: '▸'; float: right; color: var(--text2); }
+        .pm-sec[open] > summary::after { content: '▾'; }
+        .pm-sec > div { padding: 0 12px 12px; }
+        .pm-sec > #hedge-pnl-card > div:first-child, .pm-sec #hedge-plans-section > div:first-child { display: none; }
+        .pm-sec #piece-supplies-card > div { box-shadow: none !important; padding: 0 !important; margin: 0 !important; }
+        .pm-sec #piece-supplies-card > div > div:first-child { justify-content: flex-end !important; }
+        .pm-sec #piece-supplies-card > div > div:first-child > div:first-child { display: none; }
+        .pm-sec:has(> #hedge-pnl-card[style*="none"]), .pm-sec:has(> #hedge-plans-section[style*="none"]), .pm-sec:has(> #piece-supplies-card:empty) { display: none; }
+        .pm-more-info > summary { font-size: 11px; color: var(--text2); cursor: pointer; margin-top: 6px; }
+        #purchase-panel input, #purchase-panel select, #payment-panel input, #payment-panel select { border-color: var(--border) !important; }
+        #purchase-metal-weight-fields:not([style*="none"]), #payment-metal-fields:not([style*="none"]) { display: grid !important; grid-template-columns: 1fr 1.4fr; grid-template-rows: auto auto; grid-auto-flow: column; column-gap: 10px; }
     </style>
 </head>
 <body>
@@ -218,6 +245,8 @@
     <!-- "More" dropdown (Track B only) -->
     <div id="pm-more-backdrop" onclick="pmMoreClose()"></div>
     <div id="pm-more-menu">
+        <button onclick="pmMoreGo(pmSupOpen)">👥 Supplier list</button>
+        <div class="sep"></div>
         <button onclick="pmMoreGo(pmAvOpen)">🗄 Archive viewer</button>
         <button onclick="pmMoreGo(pmBackupMenuOpen)">☁ Backup &amp; restore</button>
         <button onclick="pmMoreGo(pmArchiveMenuOpen)">📦 Archive data</button>
@@ -234,6 +263,21 @@
             <div id="pm-av-tab-report" onclick="pmAvTab('report')" style="flex:1; text-align:center; padding:12px 4px; font-size:13px; font-weight:700; cursor:pointer; user-select:none; border-bottom:3px solid transparent;">📊 Report</div>
         </div>
         <div id="pm-av-body"></div>
+    </div>
+
+    <!-- Supplier list: full-screen window -->
+    <div id="pm-sup-full">
+        <div style="display:flex; align-items:center; gap:10px; padding:12px 14px; background:var(--charcoal); color:white;">
+            <button onclick="pmSupClose()" aria-label="Back" style="width:auto; margin:0; padding:6px 12px; background:rgba(255,255,255,.14); color:white; border:none; border-radius:10px; font-size:14px; font-weight:700; box-shadow:none;">← Back</button>
+            <div style="font-size:16px; font-weight:800;">Suppliers</div>
+        </div>
+        <div style="display:flex; gap:8px; padding:10px 14px 0; max-width:600px; margin:0 auto; width:100%; box-sizing:border-box;">
+            <input id="pm-sup-q" type="search" placeholder="Search supplier…" oninput="pmSupRender()" style="flex:1; margin:0; padding:9px 12px; border:1.5px solid var(--border); border-radius:10px; font-size:14px; min-width:0;">
+            <select id="pm-sup-sort" onchange="pmSupRender()" style="margin:0; padding:9px 8px; border:1.5px solid var(--border); border-radius:10px; font-size:13px; width:auto;">
+                <option value="owed">Owed first</option><option value="az">A–Z</option><option value="recent">Recent</option>
+            </select>
+        </div>
+        <div id="pm-sup-body"></div>
     </div>
 
     <div id="pm-content">
@@ -279,30 +323,34 @@
         </div>
 
         <div id="pm-pane-purchase" style="display:none;">
-            <p class="note" style="margin:0 0 12px;">Grams shown are pure (24K/999) equivalent.</p>
+            <p class="note" style="margin:0 0 10px;">Grams shown are pure (24K/999) equivalent.</p>
 
             <div style="display:flex; gap:10px; margin-bottom:12px;">
                 <button onclick="openPurchaseModal(null)" style="flex:1; padding:13px; background:var(--gold); color:white; border:none; border-radius:12px; font-size:14px; font-weight:800;">🛒 Purchase</button>
                 <button onclick="openPaymentModal()" style="flex:1; padding:13px; background:#1a1a1a; color:white; border:none; border-radius:12px; font-size:14px; font-weight:800;">💳 Payment</button>
             </div>
 
-            <div id="piece-supplies-card"></div>
+            <div id="hedge-summary-cards" style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:12px;"></div>
+
+            <div id="hedge-sales-track" style="margin-bottom:4px;"></div>
 
             <div style="display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:12px; background:var(--surface); border-radius:var(--radius); padding:10px 14px; box-shadow:0 1px 6px rgba(0,0,0,.06);">
                 <label for="hedge-sales-start-date" style="font-size:11px; color:var(--text2); font-weight:700;">Count sales since</label>
                 <input type="date" id="hedge-sales-start-date" onchange="setSalesHedgeStartDate(this.value)" style="margin:0; width:auto;">
             </div>
 
-            <div id="hedge-summary-cards" style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:12px;"></div>
-
-            <div id="hedge-pnl-card" style="display:none; background:var(--surface); border-radius:var(--radius); padding:14px; margin-bottom:16px; box-shadow:0 1px 6px rgba(0,0,0,.06);"></div>
-
-            <div id="hedge-plans-section" style="display:none; margin-bottom:20px;">
-                <div style="font-size:10px; font-weight:700; letter-spacing:.08em; color:var(--text2); text-transform:uppercase; margin-bottom:8px;">Installment Plans</div>
-                <div id="hedge-plans-list"></div>
-            </div>
-
-            <div id="hedge-sales-track" style="margin-bottom:20px;"></div>
+            <details class="pm-sec"><summary>📊 Purchase P&amp;L</summary>
+                <div id="hedge-pnl-card" style="display:none; padding:2px 0 4px;"></div>
+            </details>
+            <details class="pm-sec"><summary>📅 Installment plans</summary>
+                <div id="hedge-plans-section" style="display:none;">
+                    <div style="font-size:10px;">Installment Plans</div>
+                    <div id="hedge-plans-list"></div>
+                </div>
+            </details>
+            <details class="pm-sec"><summary>🧩 Per-piece supplies</summary>
+                <div id="piece-supplies-card"></div>
+            </details>
         </div>
     </div>
 </div>
@@ -320,6 +368,14 @@
         <div style="display:flex; gap:8px; margin-bottom:14px;">
             <select id="purchase-party" onchange="onPurchasePartyChange()" style="flex:1; padding:10px 12px; border:1.5px solid #e0e0e0; border-radius:10px; font-size:14px; box-sizing:border-box; margin:0;"></select>
             <button onclick="deleteSelectedParty('purchase-party')" title="Delete this party" style="background:none; border:1.5px solid #e0e0e0; color:#C62828; font-size:16px; width:44px; flex-shrink:0; border-radius:10px; padding:0; margin:0;">🗑️</button>
+        </div>
+
+        <div id="purchase-status-row" style="margin-bottom:14px;">
+            <label style="font-size:12px; font-weight:700; color:#888; margin:0 0 4px 0;">STATUS</label>
+            <select id="purchase-status" onchange="onPurchaseCreditToggle()" style="padding:10px 12px; border:1.5px solid #e0e0e0; border-radius:10px; width:100%; font-size:14px; box-sizing:border-box;">
+                <option value="paid">Paid</option>
+                <option value="credit">Credit</option>
+            </select>
         </div>
 
         <div id="purchase-metal-weight-fields">
@@ -340,14 +396,6 @@
 
         <div id="purchase-track-row" style="margin-bottom:14px;">
             <p class="note">Logged against Track <span id="purchase-track-label"></span> — the track you're currently viewing.</p>
-        </div>
-
-        <div id="purchase-status-row" style="margin-bottom:14px;">
-            <label style="font-size:12px; font-weight:700; color:#888; margin:0 0 4px 0;">STATUS</label>
-            <select id="purchase-status" onchange="onPurchaseCreditToggle()" style="padding:10px 12px; border:1.5px solid #e0e0e0; border-radius:10px; width:100%; font-size:14px; box-sizing:border-box;">
-                <option value="paid">Paid</option>
-                <option value="credit">Credit</option>
-            </select>
         </div>
 
         <div id="purchase-credit-type-row" style="display:none; margin-bottom:14px;">
@@ -549,6 +597,7 @@
     let currentInvTrack = 'A';
     let _pmTapCount = 0, _pmTapTimer = null;
     function _pmRerenderActiveTab(){
+        if (window._pmSupOn) pmSupRender();
         if (_pmActiveTab === 'sales') renderSalesReport();
         else if (_pmActiveTab === 'report') renderReportTab();
         else renderPurchaseTab();
@@ -1068,12 +1117,12 @@ function computeCombinedAvgRate(metal){
         const cardsEl = document.getElementById('hedge-summary-cards');
         const metalCard = (label, icon, s, avgRate) => `
             <div style="background:var(--surface); border-radius:var(--radius); padding:14px; box-shadow:0 1px 6px rgba(0,0,0,.06);">
-                <div style="font-size:10px; font-weight:700; letter-spacing:.08em; color:var(--text2); text-transform:uppercase; margin-bottom:8px;">${icon} ${label}</div>
-                <div style="font-size:11px; color:var(--text2); margin-bottom:2px;">Owed: <b style="color:var(--text);">${s.owed.toFixed(2)}g</b></div>
-                <div style="font-size:11px; color:var(--text2); margin-bottom:8px;">Purchased: <b style="color:var(--text);">${s.hedged.toFixed(2)}g</b></div>
-                <div style="font-size:20px; font-weight:800; color:${s.toBuy > 0 ? '#C62828' : '#2E7D32'};">${s.toBuy.toFixed(2)}g</div>
-                <div style="font-size:10px; color:var(--text2); margin-bottom:${avgRate ? '6' : '0'}px;">to buy</div>
-                ${avgRate ? `<div style="font-size:10.5px; color:var(--text2); padding-top:6px; border-top:1px solid var(--border);">avg sold @ ₹${avgRate.toFixed(2)}/g</div>` : ''}
+                <div style="font-size:10px; font-weight:700; letter-spacing:.08em; color:var(--text2); text-transform:uppercase; margin-bottom:6px;">${icon} ${label} · to buy</div>
+                <div style="font-size:22px; font-weight:800; color:${s.toBuy > 0 ? '#C62828' : '#2E7D32'};">${s.toBuy.toFixed(2)}g</div>
+                <details class="pm-more-info"><summary>Details</summary>
+                    <div style="font-size:11px; color:var(--text2); margin-top:4px;">Owed: <b style="color:var(--text);">${s.owed.toFixed(2)}g</b> · Purchased: <b style="color:var(--text);">${s.hedged.toFixed(2)}g</b></div>
+                    ${avgRate ? `<div style="font-size:11px; color:var(--text2);">avg sold @ ₹${avgRate.toFixed(2)}/g</div>` : ''}
+                </details>
             </div>`;
         cardsEl.innerHTML = metalCard('Gold', '🟡', combined.Gold, computeCombinedAvgRate('Gold')) + metalCard('Silver', '⚪', combined.Silver, computeCombinedAvgRate('Silver'));
 
@@ -3227,6 +3276,174 @@ function computeCombinedAvgRate(metal){
         if (m) m.style.display = 'none'; if (bd) bd.style.display = 'none';
     }
     function pmMoreGo(fn) { pmMoreClose(); if (currentInvTrack !== 'B') return; fn(); }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // SUPPLIER LIST (More menu, Track B) — per-supplier owed + full detail,
+    // with quick Log Purchase / Log Payment for that supplier
+    // ═══════════════════════════════════════════════════════════════════
+    window._pmSupOn = false;
+    let _pmSupExp = {};
+    function pmSupOpen() {
+        window._pmSupOn = true;
+        document.getElementById('pm-sup-full').style.display = 'flex';
+        pmSupRender();
+    }
+    function pmSupClose() {
+        window._pmSupOn = false;
+        document.getElementById('pm-sup-full').style.display = 'none';
+    }
+    function pmSupToggle(id) { _pmSupExp[id] = !_pmSupExp[id]; pmSupRender(); }
+
+    function _pmSupData(pid) {
+        const T = currentInvTrack;
+        const pur = purchases.filter(p => p.partyId === pid && (p.track === T || p.planId));
+        const pay = payments.filter(x => x.partyId === pid && x.track === T);
+        const piece = pieceSupplies.filter(r => r.partyId === pid && r.track === T);
+        const metals = {};
+        ['Gold', 'Silver'].forEach(m => {
+            const mp = pur.filter(p => p.metal === m && p.creditType !== 'amount');
+            const paidBuys = mp.filter(p => p.status === 'paid');
+            const creditBuys = mp.filter(p => p.status === 'credit');
+            const mpay = pay.filter(x => x.metal === m && x.payType !== 'amount');
+            const paidG = paidBuys.reduce((a, p) => a + (p.weight || 0), 0);
+            const paidVal = paidBuys.reduce((a, p) => a + (p.weight || 0) * (p.rate || 0), 0);
+            const payG = mpay.reduce((a, x) => a + (x.weight || 0), 0);
+            const ratedG = mpay.filter(x => x.rate > 0).reduce((a, x) => a + (x.weight || 0), 0);
+            const ratedVal = mpay.filter(x => x.rate > 0).reduce((a, x) => a + (x.weight || 0) * x.rate, 0);
+            metals[m] = {
+                has: mp.length > 0 || mpay.length > 0,
+                paidG, avgPaidRate: paidG > 0 ? paidVal / paidG : 0,
+                creditG: creditBuys.reduce((a, p) => a + (p.weight || 0), 0),
+                payG, avgPayRate: ratedG > 0 ? ratedVal / ratedG : 0,
+                owed: getPartyCreditBalance(pid, T, m)
+            };
+        });
+        const amt = {
+            credit: pur.filter(p => p.status === 'credit' && p.creditType === 'amount').reduce((a, p) => a + (p.amount || 0), 0),
+            paid: pay.filter(x => x.payType === 'amount').reduce((a, x) => a + (x.amount || 0), 0),
+            owed: getPartyAmountBalance(pid, T)
+        };
+        const pc = {
+            billed: piece.filter(r => r.kind !== 'payment').reduce((a, r) => a + (r.amount || 0), 0),
+            paid: piece.filter(r => r.kind === 'payment').reduce((a, r) => a + (r.amount || 0), 0)
+        };
+        pc.due = pc.billed - pc.paid;
+        const total = metals.Gold.owed + metals.Silver.owed + amt.owed + Math.max(0, pc.due);
+        return { pur, pay, piece, metals, amt, pc, total, active: pur.length + pay.length + piece.length > 0 };
+    }
+
+    function _pmSupHistory(d) {
+        const items = [];
+        d.pur.forEach(p => {
+            let txt;
+            if (p.creditType === 'amount') txt = `Purchase · ${_pmRs(p.amount)} <span style="color:#FB8C00;">on credit</span>`;
+            else if (p.status === 'paid') txt = `Purchase · ${p.metal} ${(p.weight || 0).toFixed(2)}g @ ${_pmRs(p.rate)}/g${p.planId ? ' <span style="color:var(--text2);">(plan)</span>' : ''}`;
+            else txt = `Purchase · ${p.metal} ${(p.weight || 0).toFixed(2)}g <span style="color:#FB8C00;">on credit</span>`;
+            items.push({ t: p.createdAt, date: p.date, color: '#1C1C1E', txt, note: p.note });
+        });
+        d.pay.forEach(x => {
+            const txt = x.payType === 'amount'
+                ? `Payment · ${_pmRs(x.amount)}`
+                : `Payment · ${x.metal} ${(x.weight || 0).toFixed(2)}g ${x.rate ? '@ ' + _pmRs(x.rate) + '/g' : '(in metal)'}`;
+            items.push({ t: x.createdAt, date: x.date, color: '#2E7D32', txt, note: x.note });
+        });
+        d.piece.forEach(r => {
+            const isPay = r.kind === 'payment';
+            items.push({ t: r.createdAt, date: r.date, color: isPay ? '#2E7D32' : '#1C1C1E',
+                txt: `${isPay ? 'Piece payment' : 'Piece bill'} · ${_pmRs(r.amount)}${r.desc ? ' · ' + _rpEsc(r.desc) : ''}${r.qty ? ' · ' + r.qty + ' pc' : ''}`, note: null });
+        });
+        return items.sort((a, b) => new Date(b.t) - new Date(a.t));
+    }
+
+    function pmSupRender() {
+        const el = document.getElementById('pm-sup-body'); if (!el) return;
+        const q = ((document.getElementById('pm-sup-q') || {}).value || '').trim().toLowerCase();
+        const sortBy = (document.getElementById('pm-sup-sort') || {}).value || 'owed';
+        const last = d => Math.max(0, ...[...d.pur, ...d.pay, ...d.piece].map(x => new Date(x.createdAt).getTime() || 0));
+        const rows = parties.filter(p => !q || (p.name || '').toLowerCase().includes(q)).map(p => ({ p, d: _pmSupData(p.id) }))
+            .sort((a, b) => sortBy === 'recent' ? last(b.d) - last(a.d)
+                : sortBy === 'az' ? (a.p.name || '').localeCompare(b.p.name || '')
+                : (b.d.total > 0.001) - (a.d.total > 0.001) || (a.p.name || '').localeCompare(b.p.name || ''));
+        let html = `<p class="note" style="margin:0 0 12px;">Track ${currentInvTrack} · grams are pure (24K/999) equivalent. Tap a supplier for full details.</p>`;
+        if (!rows.length) html += `<div style="${_cardCss} font-size:13px; color:var(--text2);">${q ? 'No supplier matches your search.' : 'No suppliers yet. Add one from a Purchase.'}</div>`;
+        const lbl = 'font-size:11px; color:var(--text2);';
+        rows.forEach(({ p, d }) => {
+            const open = !!_pmSupExp[p.id];
+            const chips = [];
+            if (d.metals.Gold.owed > 0.001) chips.push(`Gold ${d.metals.Gold.owed.toFixed(2)}g`);
+            if (d.metals.Silver.owed > 0.001) chips.push(`Silver ${d.metals.Silver.owed.toFixed(2)}g`);
+            if (d.amt.owed > 0.001) chips.push(_pmRs(d.amt.owed));
+            if (d.pc.due > 0.5) chips.push(`Pieces ${_pmRs(d.pc.due)}`);
+            const status = chips.length
+                ? `<div style="font-size:12px; font-weight:800; color:#C62828; text-align:right;">${chips.join('<br>')}</div>`
+                : `<div style="font-size:12px; font-weight:800; color:#2E7D32;">${d.active ? 'Settled' : 'No activity'}</div>`;
+            html += `<div style="${_cardCss} padding:0; overflow:hidden;">
+                <div onclick="pmSupToggle('${_rpEsc(p.id)}')" style="display:flex; justify-content:space-between; align-items:center; gap:10px; padding:13px 14px; cursor:pointer; user-select:none;">
+                    <div style="font-size:14px; font-weight:800;"><span style="font-size:11px; color:var(--text2); margin-right:6px;">${open ? '▾' : '▸'}</span>${_rpEsc(p.name)}</div>
+                    ${status}
+                </div>`;
+            if (open) {
+                html += '<div style="padding:0 14px 14px; border-top:1px solid var(--border);">';
+                // Owed now
+                html += `<div style="${_hdCss} margin-top:12px;">Owed now</div>
+                    <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:12px;">`;
+                const owedBox = (label, val, bad) => `<div style="background:#F7F7F5; border-radius:10px; padding:9px 11px;"><div style="${lbl}">${label}</div><div style="font-size:15px; font-weight:800; color:${bad ? '#C62828' : '#2E7D32'};">${val}</div></div>`;
+                html += owedBox('Gold', d.metals.Gold.owed.toFixed(2) + ' g', d.metals.Gold.owed > 0.001);
+                html += owedBox('Silver', d.metals.Silver.owed.toFixed(2) + ' g', d.metals.Silver.owed > 0.001);
+                html += owedBox('Amount credit', _pmRs(d.amt.owed), d.amt.owed > 0.001);
+                html += owedBox('Per-piece bills', _pmRs(Math.max(0, d.pc.due)), d.pc.due > 0.5);
+                html += '</div>';
+                // Breakdown
+                html += `<div style="${_hdCss}">Breakdown</div><div style="font-size:12.5px; line-height:1.7; margin-bottom:12px;">`;
+                ['Gold', 'Silver'].forEach(m => {
+                    const x = d.metals[m]; if (!x.has) return;
+                    html += `<div><b>${m}</b> — bought & paid ${x.paidG.toFixed(2)}g${x.avgPaidRate ? ' (avg ' + _pmRs(x.avgPaidRate) + '/g)' : ''} · on credit ${x.creditG.toFixed(2)}g · settled ${x.payG.toFixed(2)}g${x.avgPayRate ? ' (avg ' + _pmRs(x.avgPayRate) + '/g)' : ''} · <b>owed ${x.owed.toFixed(2)}g</b></div>`;
+                });
+                if (d.amt.credit || d.amt.paid) html += `<div><b>Amount credit</b> — credit ${_pmRs(d.amt.credit)} · paid ${_pmRs(d.amt.paid)} · <b>owed ${_pmRs(d.amt.owed)}</b></div>`;
+                if (d.pc.billed || d.pc.paid) html += `<div><b>Per-piece</b> — billed ${_pmRs(d.pc.billed)} · paid ${_pmRs(d.pc.paid)} · <b>due ${_pmRs(Math.max(0, d.pc.due))}</b></div>`;
+                if (!d.active) html += '<div style="color:var(--text2);">Nothing logged for this supplier on this track yet.</div>';
+                html += '</div>';
+                // Actions
+                html += `<div style="display:flex; gap:8px; margin-bottom:12px;">
+                    <button onclick="pmSupLogPurchase('${_rpEsc(p.id)}')" style="flex:1; margin:0; padding:11px; background:var(--gold); color:white; border:none; border-radius:10px; font-size:13px; font-weight:800;">🛒 Log purchase</button>
+                    <button onclick="pmSupLogPayment('${_rpEsc(p.id)}')" style="flex:1; margin:0; padding:11px; background:#1a1a1a; color:white; border:none; border-radius:10px; font-size:13px; font-weight:800;">💳 Log payment</button>
+                </div>`;
+                // History
+                const hist = _pmSupHistory(d);
+                if (hist.length) {
+                    html += `<div style="${_hdCss}">History</div>`;
+                    hist.slice(0, 40).forEach(h => {
+                        html += `<div style="padding:6px 0; border-top:1px solid #eee; font-size:12.5px; color:${h.color};">${h.txt}
+                            <div style="font-size:10.5px; color:var(--text2);">${_rpEsc(h.date || (h.t || '').slice(0, 10))}${h.note ? ' · ' + _rpEsc(h.note) : ''}</div></div>`;
+                    });
+                    if (hist.length > 40) html += `<div class="note" style="margin-top:6px;">Showing latest 40 of ${hist.length} entries.</div>`;
+                }
+                html += '</div>';
+            }
+            html += '</div>';
+        });
+        el.innerHTML = html;
+    }
+
+    // Opens the normal Purchase modal with this supplier already selected.
+    function pmSupLogPurchase(pid) {
+        openPurchaseModal(null);
+        const sel = document.getElementById('purchase-party');
+        if (sel && parties.some(p => p.id === pid)) sel.value = pid;
+    }
+    // Opens the normal Payment modal on this supplier, defaulting to whichever balance is outstanding.
+    function pmSupLogPayment(pid) {
+        const T = currentInvTrack;
+        const g = getPartyCreditBalance(pid, T, 'Gold'), si = getPartyCreditBalance(pid, T, 'Silver'), a = getPartyAmountBalance(pid, T);
+        if (g <= 0.001 && si <= 0.001 && a <= 0.001) { showCustomAlert(`${_rpEsc(getPartyName(pid))} has no outstanding metal or amount credit to pay against.`); return; }
+        openPaymentModal();
+        const sel = document.getElementById('payment-party');
+        if (!sel || ![...sel.options].some(o => o.value === pid)) return;
+        sel.value = pid;
+        onPaymentPartyChange();
+        if (document.getElementById('payment-type').value === 'metal' && g <= 0.001 && si > 0.001) document.getElementById('payment-metal').value = 'Silver';
+        onPaymentSelectionChange();
+    }
 
     const _pmPopWrap = inner => '<div style="display:flex; flex-direction:column; gap:8px; width:100%;">' + inner + '</div>';
 
