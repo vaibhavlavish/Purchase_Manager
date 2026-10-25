@@ -40,6 +40,7 @@
         window.dbGet = get;
         window.dbRunTransaction = runTransaction;
         window.firebaseAuth = auth;
+        window._pmDbUrl = firebaseConfig.databaseURL;
         window.authSignOut = signOut;
 
         // ── ORIGIN LOCK / WRITE PROTECTION ──────────────────────────────
@@ -226,6 +227,17 @@
             <div style="background:var(--surface); border-radius:var(--radius); padding:14px; box-shadow:0 1px 6px rgba(0,0,0,.06); margin-bottom:12px;">
                 <div style="font-size:10px; font-weight:700; letter-spacing:.08em; color:var(--text2); text-transform:uppercase; margin-bottom:10px;">Data</div>
                 <button onclick="rpExportCsv()" style="width:100%; padding:10px; font-size:13px; font-weight:700; border:1.5px solid var(--border); border-radius:10px; background:white; color:var(--text); margin-bottom:12px;">⬇ Export this period (CSV)</button>
+                <div style="border-top:1px solid var(--border); padding-top:10px; margin-bottom:12px;">
+                    <div style="font-size:11px; font-weight:700; margin-bottom:4px;">Cloud backup</div>
+                    <div id="pm-bk-last" class="note" style="margin-bottom:2px;">Last cloud backup: checking…</div>
+                    <div id="pm-bk-msg" class="note" style="margin-bottom:8px; min-height:14px;"></div>
+                    <div style="display:flex; gap:8px; margin-bottom:8px;">
+                        <button onclick="pmBkManual()" style="flex:1; padding:10px; font-size:12px; font-weight:700; border:1.5px solid var(--border); border-radius:10px; background:white; color:var(--text);">☁ Back up now</button>
+                        <button onclick="pmBkDownloadFile()" style="flex:1; padding:10px; font-size:12px; font-weight:700; border:1.5px solid var(--border); border-radius:10px; background:white; color:var(--text);">⬇ Download backup file</button>
+                    </div>
+                    <button onclick="pmRestoreOpen()" style="width:100%; padding:10px; font-size:12px; font-weight:700; border:1.5px solid #C62828; border-radius:10px; background:white; color:#C62828;">↩ Restore…</button>
+                    <input type="file" id="pm-restore-file" accept=".json,application/json" style="display:none;" onchange="pmRestoreFileChosen(this)">
+                </div>
                 <label style="font-size:11px; display:block; margin-bottom:3px;">Delete everything before</label>
                 <input type="date" id="rp-del-date" style="margin:0 0 8px;">
                 <div style="display:flex; gap:8px;">
@@ -517,6 +529,7 @@
     let parties = [];
     let purchases = [];
     let payments = [];
+    const _pmLoaded = {};   // set once each core listener has delivered its first snapshot (gates auto backup)
 
     function _objToArraySimple(obj) {
         if (!obj) return [];
@@ -543,17 +556,20 @@
         // the POS at save time — so clearing invoices in the POS never affects it.
         window.dbOnValue(window.dbRef(window.firebaseDB, 'pmSales'), snap => {
             invoiceHistory = _objToArraySimple(snap.val());
+            _pmLoaded.pmSales = true;
             pmMaybeImportSales();
             _pmRerenderActiveTab();
         }, err => console.error('[PmSales] read error', err));
 
         window.dbOnValue(window.dbRef(window.firebaseDB, 'cashbook'), snap => {
             cashbook = _objToArraySimple(snap.val());
+            _pmLoaded.cashbook = true;
             _pmRerenderActiveTab();
         }, err => console.error('[Cashbook] read error', err));
 
         window.dbOnValue(window.dbRef(window.firebaseDB, 'pieceSupplies'), snap => {
             pieceSupplies = _objToArraySimple(snap.val());
+            _pmLoaded.pieceSupplies = true;
             _pmRerenderActiveTab();
         }, err => console.error('[PieceSupplies] read error', err));
 
@@ -565,18 +581,21 @@
         window.dbOnValue(window.dbRef(window.firebaseDB, 'parties'), snap => {
             const val = snap.val() || {};
             parties = Object.values(val).sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+            _pmLoaded.parties = true;
             _pmRerenderActiveTab();
         }, err => console.error('[Parties] read error', err));
 
         window.dbOnValue(window.dbRef(window.firebaseDB, 'purchases'), snap => {
             const val = snap.val() || {};
             purchases = Object.values(val).sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+            _pmLoaded.purchases = true;
             _pmRerenderActiveTab();
         }, err => console.error('[Purchases] read error', err));
 
         window.dbOnValue(window.dbRef(window.firebaseDB, 'payments'), snap => {
             const val = snap.val() || {};
             payments = Object.values(val).sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+            _pmLoaded.payments = true;
             _pmRerenderActiveTab();
         }, err => console.error('[Payments] read error', err));
     }
@@ -1836,6 +1855,11 @@ function computeCombinedAvgRate(metal){
         _rpDownload('pm_' + kind + '_before_' + d + '.json', JSON.stringify(list, null, 2));
         showCustomConfirm('A backup file was just downloaded. Delete <b>' + list.length + '</b> ' + (kind === 'cashbook' ? 'cash book entries' : 'invoices') + ' dated before <b>' + d + '</b> from the Purchase Manager? This does not touch the POS and cannot be undone.', 'Confirm delete', async () => {
             const node = kind === 'cashbook' ? 'cashbook' : 'pmSales';
+            if (window._writeAllowed) {
+                invToast('Saving cloud backup first…', 6000);
+                const bk = await pmBackupNow('before-delete', { silent: true });
+                if (!bk.ok && !(await _pmAsk('The cloud backup could not be saved. The backup file was already downloaded. Delete anyway?', 'Backup failed', 'Delete anyway'))) return;
+            }
             try {
                 for (let i = 0; i < list.length; i += 200) {
                     const upd = {}; list.slice(i, i + 200).forEach(x => { upd[node + '/' + x.id] = null; });
@@ -1853,7 +1877,7 @@ function computeCombinedAvgRate(metal){
         _pmSalesImportChecked = true;
         try {
             const meta = await window.dbGet(window.dbRef(window.firebaseDB, 'pmMeta/salesImported'));
-            if (meta.val() === true || !window._writeAllowed) return;
+            if (meta.val() === true || !window._writeAllowed) { window._pmImportSettled = true; return; }
             const src = await window.dbGet(window.dbRef(window.firebaseDB, 'jewelryData/invoiceHistory'));
             const have = new Set(invoiceHistory.map(i => i.id));
             const all = Object.values(src.val() || {}).filter(i => i && i.id && !have.has(i.id));
@@ -1863,6 +1887,7 @@ function computeCombinedAvgRate(metal){
             }
             await window.dbUpdate(window.dbRef(window.firebaseDB, '/'), { 'pmMeta/salesImported': true });
             console.log('[PM] imported', all.length, 'invoices into pmSales');
+            window._pmImportSettled = true;
         } catch (e) { console.error('[PM] sales import failed', e); _pmSalesImportChecked = false; }
     }
 
@@ -2146,6 +2171,408 @@ function computeCombinedAvgRate(metal){
         `;
     }
 
+    // ═══════════════════════════════════════════════════════════════════
+    // PURCHASE MANAGER — own cloud backup / restore (independent of the POS)
+    // Touches ONLY the PM-owned nodes listed below. Never reads or writes
+    // jewelryData/*, acctAccounts, acctCategories, creditors, creditTxns,
+    // creditorPhotos, installments, installmentIdPhotos or savingsPlans.
+    // Ledger entries and bill history are intentionally NOT included.
+    // ═══════════════════════════════════════════════════════════════════
+    const PM_BK_NODES = ['parties', 'purchases', 'payments', 'pieceSupplies', 'manualOwedLog',
+                         'hedgeSalesStartDates', 'cashbook', 'pmSales', 'pmMeta'];
+    const PM_BK_LABEL = { parties: 'Suppliers', purchases: 'Purchases', payments: 'Supplier payments',
+        pieceSupplies: 'Piece supplies', manualOwedLog: 'Manual owed log', hedgeSalesStartDates: 'Sales start dates',
+        cashbook: 'Cash book', pmSales: 'Sales copy', pmMeta: 'Meta' };
+    const PM_BK_VERSION = 1;
+    const PM_BK_KEEP = 14;
+    const PM_BK_CHUNK = 3 * 1024 * 1024;        // max bytes per cloud write while saving a snapshot
+    const PM_BK_WARN_BYTES = 8 * 1024 * 1024;   // warn the user above this total
+    const PM_RESTORE_ATOMIC_MAX = 12 * 1024 * 1024; // one atomic write up to this size
+    const PM_RESTORE_NODE_MAX = 14 * 1024 * 1024;   // a single node above this cannot be restored safely
+    let _pmBkBusy = false;
+    let _pmBkLastAutoCheck = 0;
+
+    const _pmSleep = ms => new Promise(r => setTimeout(r, ms));
+    const _pmRoot = () => window.dbRef(window.firebaseDB, '/');
+    const _pmRefAt = p => window.dbRef(window.firebaseDB, p);
+    function _pmCount(v) { if (v == null) return 0; return (typeof v === 'object') ? Object.keys(v).length : 1; }
+    function _pmBytes(v) { try { return new Blob([JSON.stringify(v)]).size; } catch (e) { return JSON.stringify(v).length; } }
+    function _pmMB(b) { return (b / 1048576).toFixed(1) + ' MB'; }
+    function _pmFmtDate(iso) {
+        const d = new Date(iso); if (isNaN(d)) return String(iso || '—');
+        return d.toLocaleString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+    }
+    function _pmLocalDay(iso) { const d = new Date(iso); return isNaN(d) ? '' : d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); }
+    function _pmStamp(d, withSec) {
+        const p = n => String(n).padStart(2, '0');
+        return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()) + '_' + p(d.getHours()) + p(d.getMinutes()) + (withSec ? p(d.getSeconds()) : '');
+    }
+    function _pmCountsLine(counts) { return PM_BK_NODES.map(n => PM_BK_LABEL[n] + ' ' + ((counts && counts[n]) || 0)).join(' · '); }
+
+    // Modal helpers (reuse the existing alert modal shell)
+    function _pmSetModal(title, html, actionsHtml) {
+        document.getElementById('pm-alert-title').textContent = title;
+        document.getElementById('pm-alert-message').innerHTML = html;
+        document.getElementById('pm-alert-actions').innerHTML = actionsHtml || '';
+        document.getElementById('pm-alert-modal').classList.add('show');
+    }
+    const _pmBtn = (label, onclick, kind) => '<button onclick="' + onclick + '" style="flex:1; padding:12px; border:none; border-radius:10px; font-weight:700; ' +
+        (kind === 'danger' ? 'background:#C62828; color:white;' : kind === 'ghost' ? 'background:#eee; color:#333;' : 'background:var(--gold); color:white;') + '">' + label + '</button>';
+    function _pmAsk(msg, title, okLabel) {
+        return new Promise(res => {
+            window._pmAskRes = res;
+            _pmSetModal(title || 'Confirm', msg, _pmBtn('Cancel', '_pmAskDone(false)', 'ghost') + _pmBtn(okLabel || 'OK', '_pmAskDone(true)'));
+        });
+    }
+    function _pmAskDone(v) { closePmAlert(); const r = window._pmAskRes; window._pmAskRes = null; if (r) r(v); }
+
+    // Status line (Data card, Report tab)
+    function _pmBkMsg(text, level) {
+        const el = document.getElementById('pm-bk-msg'); if (!el) return;
+        el.textContent = text || '';
+        el.style.color = level === 'err' ? '#C62828' : level === 'warn' ? '#E65100' : 'var(--text2)';
+    }
+    async function pmBkRefreshStatus() {
+        const el = document.getElementById('pm-bk-last'); if (!el) return;
+        try {
+            const s = await _pmBkNewestComplete();
+            if (!s) { el.textContent = 'Last cloud backup: none yet'; el.style.color = '#E65100'; return; }
+            const ageH = (Date.now() - new Date(s.createdAt).getTime()) / 3600000;
+            el.textContent = 'Last cloud backup: ' + _pmFmtDate(s.createdAt) + (ageH > 48 ? ' — ⚠ older than 48 hours, back up now' : '');
+            el.style.color = ageH > 48 ? '#C62828' : 'var(--text2)';
+        } catch (e) { console.error('[PM backup] status', e); el.textContent = 'Last cloud backup: could not check'; el.style.color = '#E65100'; }
+    }
+
+    // ── Cloud access helpers ──
+    // Shallow reads use the REST endpoint (keys only, no data download). Falls back to the SDK for counts.
+    async function _pmShallow(path) {
+        const user = window.firebaseAuth && window.firebaseAuth.currentUser;
+        if (!user || !window._pmDbUrl) throw new Error('not signed in');
+        const tok = await user.getIdToken();
+        const r = await fetch(window._pmDbUrl + '/' + path + '.json?shallow=true&auth=' + encodeURIComponent(tok));
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return r.json();
+    }
+    async function _pmShallowCount(path) {
+        try { const j = await _pmShallow(path); return _pmCount(j); }
+        catch (e) { const s = await window.dbGet(_pmRefAt(path)); return _pmCount(s.val()); }
+    }
+    async function _pmBkIds() { const j = await _pmShallow('pmBackups'); return (j && typeof j === 'object') ? Object.keys(j).sort().reverse() : []; }
+    async function _pmBkMeta(id) {
+        const g = p => window.dbGet(_pmRefAt('pmBackups/' + id + '/' + p)).then(s => s.val());
+        const [createdAt, createdFrom, counts, backupVersion] = await Promise.all([g('createdAt'), g('createdFrom'), g('counts'), g('backupVersion')]);
+        return { id, createdAt, createdFrom, counts, backupVersion, complete: !!(createdAt && counts) };
+    }
+    async function _pmBkList() {
+        const ids = await _pmBkIds();
+        const items = await Promise.all(ids.map(_pmBkMeta));
+        return items.sort((a, b) => String(b.createdAt || b.id).localeCompare(String(a.createdAt || a.id)));
+    }
+    async function _pmBkNewestComplete() {
+        const ids = await _pmBkIds();
+        for (const id of ids.slice(0, 4)) { const m = await _pmBkMeta(id); if (m.complete) return m; }
+        return null;
+    }
+    async function _pmBkReadAll() {
+        const out = {};
+        await Promise.all(PM_BK_NODES.map(async n => { const s = await window.dbGet(_pmRefAt(n)); out[n] = s.val(); }));
+        return out;
+    }
+    function _pmBkCounts(cur) { const c = {}; PM_BK_NODES.forEach(n => { c[n] = _pmCount(cur[n]); }); return c; }
+
+    // ── Take a snapshot (core, no locking) ──
+    async function _pmBkDo(kind, opts) {
+        const cur = await _pmBkReadAll();
+        const counts = _pmBkCounts(cur);
+        const total = PM_BK_NODES.reduce((a, n) => a + counts[n], 0);
+        if (kind === 'auto' && total === 0) return { ok: false, reason: 'empty' };   // never auto-back-up empty data
+        const size = _pmBytes(cur);
+        const existing = new Set(await _pmBkIds());
+        const now = new Date();
+        let id = _pmStamp(now, false);
+        if (existing.has(id)) id = _pmStamp(now, true);
+        for (let i = 2; existing.has(id); i++) id = _pmStamp(now, true) + '_' + i;
+        const base = 'pmBackups/' + id;
+        const iso = now.toISOString();
+        try {
+            const pending = {}; let bytes = 0;
+            const flush = async () => { if (Object.keys(pending).length) { await window.dbUpdate(_pmRoot(), Object.assign({}, pending)); for (const k in pending) delete pending[k]; bytes = 0; } };
+            for (const n of PM_BK_NODES) {
+                const v = cur[n]; if (v == null) continue;
+                const sz = _pmBytes(v);
+                if (sz <= PM_BK_CHUNK) {
+                    if (bytes + sz > PM_BK_CHUNK) await flush();
+                    pending[base + '/data/' + n] = v; bytes += sz;
+                } else {                                   // large section: split across writes by child key
+                    await flush();
+                    let sub = {}, sb = 0;
+                    for (const k of Object.keys(v)) {
+                        const cs = _pmBytes(v[k]);
+                        if (sb + cs > PM_BK_CHUNK && Object.keys(sub).length) { await window.dbUpdate(_pmRoot(), sub); sub = {}; sb = 0; }
+                        sub[base + '/data/' + n + '/' + k] = v[k]; sb += cs;
+                    }
+                    if (Object.keys(sub).length) await window.dbUpdate(_pmRoot(), sub);
+                }
+            }
+            await flush();
+            // Meta last: a snapshot only counts as valid once counts + createdAt exist
+            await window.dbUpdate(_pmRoot(), {
+                [base + '/backupVersion']: PM_BK_VERSION, [base + '/createdFrom']: kind,
+                [base + '/counts']: counts, [base + '/createdAt']: iso
+            });
+            // Confirm: read back counts, then compare each section's stored child count with what we read
+            const back = (await window.dbGet(_pmRefAt(base + '/counts'))).val();
+            if (!back) throw new Error('verify: counts missing');
+            for (const n of PM_BK_NODES) {
+                if ((back[n] || 0) !== counts[n]) throw new Error('verify: counts differ for ' + n);
+                if (counts[n] > 0) {
+                    const stored = await _pmShallowCount(base + '/data/' + n);
+                    if (stored !== counts[n]) throw new Error('verify: ' + n + ' stored ' + stored + ' of ' + counts[n]);
+                }
+            }
+        } catch (e) {
+            try { await window.dbRemove(_pmRefAt(base)); } catch (e2) { console.error('[PM backup] cleanup failed', e2); }
+            throw e;
+        }
+        return { ok: true, id, iso, counts, total, size, cur };
+    }
+
+    // Prune only AFTER the new snapshot is confirmed
+    async function _pmBkPrune(newId, kind, iso) {
+        const list = await _pmBkList();
+        const del = [];
+        if (kind === 'auto') {
+            const day = _pmLocalDay(iso);
+            list.forEach(s => { if (s.id !== newId && s.complete && s.createdFrom === 'auto' && _pmLocalDay(s.createdAt) === day) del.push(s.id); });
+        }
+        list.forEach(s => {          // half-written leftovers older than 1 hour
+            if (s.complete || s.id === newId) return;
+            const m = /^(\d{4})-(\d{2})-(\d{2})_(\d{2})(\d{2})(\d{2})?/.exec(s.id);
+            const t = m ? new Date(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +(m[6] || 0)).getTime() : 0;
+            if (!t || Date.now() - t > 3600000) del.push(s.id);
+        });
+        const keep = list.filter(s => s.complete && !del.includes(s.id));
+        keep.slice(PM_BK_KEEP).forEach(s => { if (s.id !== newId) del.push(s.id); });
+        for (const id of del) { try { await window.dbRemove(_pmRefAt('pmBackups/' + id)); } catch (e) { console.error('[PM backup] prune failed', id, e); } }
+    }
+
+    // ── Public: take a snapshot with locking, status and safe failure ──
+    async function pmBackupNow(kind, opts) {
+        opts = opts || {};
+        if (!window._writeAllowed) {
+            _pmBkMsg('Cloud backup: read-only copy — skipped', 'warn');
+            if (!opts.silent) showCustomAlert('This copy is read-only, so cloud backups are skipped. Open the official app to back up.');
+            return { ok: false, reason: 'readonly' };
+        }
+        if (_pmBkBusy) { if (!opts.silent) invToast('Another backup is running…'); return { ok: false, reason: 'busy' }; }
+        _pmBkBusy = true;
+        try {
+            _pmBkMsg('Backing up to cloud…');
+            const r = await _pmBkDo(kind, opts);
+            if (!r.ok) { _pmBkMsg('Cloud backup skipped: nothing to back up yet', 'warn'); return r; }
+            try { await _pmBkPrune(r.id, kind, r.iso); } catch (e) { console.error('[PM backup] prune', e); }
+            const big = r.size > PM_BK_WARN_BYTES;
+            _pmBkMsg(big ? 'Backup saved, but it is ' + _pmMB(r.size) + ' (over 8 MB) — consider deleting old data.' : 'Backup saved ✓', big ? 'warn' : 'ok');
+            if (big && !opts.silent) showCustomAlert('Backup saved, but its size is ' + _pmMB(r.size) + ', over the 8 MB warning level. Consider using "Delete everything before" to trim old data.');
+            else if (!opts.silent) invToast('✅ Cloud backup saved');
+            pmBkRefreshStatus();
+            return r;
+        } catch (e) {
+            console.error('[PM backup] failed', e);
+            _pmBkMsg('Cloud backup failed — ' + (e && e.message ? e.message : 'try again'), 'err');
+            if (!opts.silent) showCustomAlert('Cloud backup failed: ' + (e && e.message ? e.message : 'unknown error') + '<br><br>Your data was not changed. Check that the Firebase rules include <b>pmBackups</b>.');
+            return { ok: false, reason: 'error', error: e };
+        } finally { _pmBkBusy = false; }
+    }
+    function pmBkManual() { return pmBackupNow('manual', {}); }
+
+    // ── Automatic backup on open (and when the phone app is resumed) ──
+    function _pmCoreReady() { return ['pmSales', 'cashbook', 'pieceSupplies', 'parties', 'purchases', 'payments'].every(k => _pmLoaded[k]) && window._pmImportSettled === true; }
+    async function pmAutoBackupCheck() {
+        _pmBkLastAutoCheck = Date.now();
+        try {
+            await pmBkRefreshStatus();
+            if (!window._writeAllowed) { _pmBkMsg('Cloud backup: read-only copy — skipped', 'warn'); return; }
+            const t0 = Date.now();
+            while (!_pmCoreReady()) {
+                if (Date.now() - t0 > 60000) { _pmBkMsg('Auto backup skipped: data was still loading', 'warn'); return; }
+                await _pmSleep(500);
+            }
+            const newest = await _pmBkNewestComplete();
+            if (newest && (Date.now() - new Date(newest.createdAt).getTime()) < 24 * 3600000) return;
+            await pmBackupNow('auto', { silent: true });
+        } catch (e) { console.error('[PM backup] auto check', e); _pmBkMsg('Auto backup could not run', 'warn'); }
+    }
+    function pmAutoBackupStart() {
+        pmAutoBackupCheck();
+        document.addEventListener('visibilitychange', () => {
+            if (document.visibilityState === 'visible' && Date.now() - _pmBkLastAutoCheck > 3600000) pmAutoBackupCheck();
+        });
+    }
+
+    // ── Backup file (works on iOS Safari: build first, then a second tap opens the share sheet) ──
+    async function pmBkDownloadFile() {
+        try {
+            invToast('Preparing backup file…', 6000);
+            const cur = await _pmBkReadAll();
+            const counts = _pmBkCounts(cur);
+            const now = new Date();
+            const payload = { backupVersion: PM_BK_VERSION, app: 'suhag-purchase-manager', createdAt: now.toISOString(), createdFrom: 'file', counts, data: cur };
+            const json = JSON.stringify(payload);
+            window._pmBkReady = { json, name: 'pm_backup_' + _pmStamp(now, true) + '.json' };
+            _pmSetModal('Backup file ready',
+                '<div style="text-align:left; font-size:13px;">' + _pmMB(new Blob([json]).size) + '<br><span style="font-size:11px; color:var(--text2);">' + _pmCountsLine(counts) + '</span></div>',
+                _pmBtn('Close', 'closePmAlert()', 'ghost') + _pmBtn('Save file', 'pmBkSaveReady()'));
+        } catch (e) { console.error(e); showCustomAlert('Could not prepare the backup file: ' + (e.message || e)); }
+    }
+    function pmBkSaveReady() {
+        const r = window._pmBkReady; if (!r) return;
+        try {
+            const f = new File([r.json], r.name, { type: 'application/json' });
+            if (navigator.canShare && navigator.canShare({ files: [f] })) {
+                navigator.share({ files: [f], title: r.name }).catch(e => { if (!e || e.name !== 'AbortError') _pmBkAnchor(r); });
+                return;
+            }
+        } catch (e) { /* fall through to anchor download */ }
+        _pmBkAnchor(r);
+    }
+    function _pmBkAnchor(r) {
+        const url = URL.createObjectURL(new Blob([r.json], { type: 'application/json' }));
+        const a = document.createElement('a'); a.href = url; a.download = r.name;
+        document.body.appendChild(a); a.click(); document.body.removeChild(a);
+        setTimeout(() => URL.revokeObjectURL(url), 60000);
+    }
+
+    // ── Restore ──
+    function _pmBkValidate(o) {
+        const err = [];
+        if (!o || typeof o !== 'object') return { ok: false, errors: ['This is not a Purchase Manager backup.'] };
+        if (o.backupVersion !== PM_BK_VERSION) err.push('Wrong or missing backupVersion (expected ' + PM_BK_VERSION + '). This may be a POS backup or a file from another app.');
+        if (!o.counts || typeof o.counts !== 'object') err.push('Counts are missing.');
+        if (isNaN(new Date(o.createdAt))) err.push('Backup date is missing.');
+        const data = (o.data && typeof o.data === 'object') ? o.data : {};
+        if (!o.data && o.counts && PM_BK_NODES.some(n => o.counts[n] > 0)) err.push('Backup data is missing.');
+        Object.keys(data).forEach(k => { if (PM_BK_NODES.indexOf(k) < 0) err.push('Unexpected section "' + k + '" — this file contains data the Purchase Manager does not own.'); });
+        if (o.counts) PM_BK_NODES.forEach(n => {
+            if (typeof o.counts[n] !== 'number') { err.push('Section "' + n + '" is missing from counts.'); return; }
+            const v = data[n];
+            if (v != null && typeof v !== 'object') err.push('Section "' + n + '" has the wrong shape.');
+            else if (_pmCount(v) !== o.counts[n]) err.push('Section "' + n + '" has ' + _pmCount(v) + ' records but the backup says ' + o.counts[n] + ' — the backup is incomplete or damaged.');
+        });
+        if (err.length) return { ok: false, errors: err };
+        return { ok: true, createdAt: o.createdAt, createdFrom: o.createdFrom || 'file', counts: o.counts, data };
+    }
+    function pmRestoreOpen() {
+        if (!window._writeAllowed) { showCustomAlert('This copy is read-only — restore is disabled. Open the official app to restore.'); return; }
+        _pmSetModal('Restore Purchase Manager data',
+            '<div style="text-align:left; font-size:13px;">Choose where to restore from. This replaces ALL Purchase Manager data (suppliers, purchases, payments, piece supplies, owed log, cash book, sales copy). The POS data is never touched.</div>',
+            '<div style="display:flex; flex-direction:column; gap:8px; width:100%;">' +
+            _pmBtn('☁ Cloud snapshot', 'pmRestorePickCloud()') + _pmBtn('📄 Backup file', 'pmRestorePickFile()') + _pmBtn('Cancel', 'closePmAlert()', 'ghost') + '</div>');
+    }
+    async function pmRestorePickCloud() {
+        _pmSetModal('Cloud snapshots', '<div style="font-size:13px;">Loading…</div>', '');
+        try {
+            const list = (await _pmBkList()).filter(s => s.complete);
+            if (!list.length) { _pmSetModal('Cloud snapshots', '<div style="font-size:13px;">No cloud snapshots yet.</div>', _pmBtn('Close', 'closePmAlert()', 'ghost')); return; }
+            const rows = list.map(s => '<div onclick="pmRestoreLoadSnap(\'' + s.id + '\')" style="text-align:left; border:1.5px solid var(--border); border-radius:10px; padding:10px; margin-bottom:8px; cursor:pointer;">' +
+                '<div style="font-weight:700; font-size:13px;">' + _pmFmtDate(s.createdAt) + ' <span style="font-weight:600; font-size:10px; color:var(--text2);">· ' + (s.createdFrom || '') + '</span></div>' +
+                '<div style="font-size:11px; color:var(--text2); margin-top:3px;">' + _pmCountsLine(s.counts) + '</div></div>').join('');
+            _pmSetModal('Pick a snapshot', rows, _pmBtn('Cancel', 'closePmAlert()', 'ghost'));
+        } catch (e) { console.error(e); _pmSetModal('Cloud snapshots', '<div style="font-size:13px;">Could not read the snapshot list: ' + (e.message || e) + '</div>', _pmBtn('Close', 'closePmAlert()', 'ghost')); }
+    }
+    async function pmRestoreLoadSnap(id) {
+        if (!/^[0-9_\-]+$/.test(id)) return;
+        _pmSetModal('Loading snapshot…', '<div style="font-size:13px;">Reading ' + id + '…</div>', '');
+        try {
+            const o = (await window.dbGet(_pmRefAt('pmBackups/' + id))).val();
+            _pmRestoreConfirm(_pmBkValidate(o), 'Cloud snapshot ' + id);
+        } catch (e) { console.error(e); showCustomAlert('Could not read that snapshot: ' + (e.message || e)); }
+    }
+    function pmRestorePickFile() { closePmAlert(); const i = document.getElementById('pm-restore-file'); if (i) { i.value = ''; i.click(); } }
+    function pmRestoreFileChosen(inp) {
+        const f = inp.files && inp.files[0]; if (!f) return;
+        const rd = new FileReader();
+        rd.onload = () => {
+            let o = null;
+            try { o = JSON.parse(rd.result); } catch (e) { showCustomAlert('That file is not valid JSON.'); inp.value = ''; return; }
+            _pmRestoreConfirm(_pmBkValidate(o), 'File ' + f.name);
+            inp.value = '';
+        };
+        rd.onerror = () => showCustomAlert('Could not read that file.');
+        rd.readAsText(f);
+    }
+    function _pmRestoreConfirm(v, src) {
+        if (!v.ok) { _pmSetModal('Cannot restore', '<div style="text-align:left; font-size:13px; color:#C62828;">' + v.errors.map(e => '• ' + e).join('<br>') + '</div>', _pmBtn('Close', 'closePmAlert()', 'ghost')); return; }
+        window._pmRestorePending = v;
+        const rows = PM_BK_NODES.map(n => '<div style="display:flex; justify-content:space-between; font-size:13px; padding:3px 0; border-top:1px solid #eee;"><span>' + PM_BK_LABEL[n] + '</span><b>' + v.counts[n] + '</b></div>').join('');
+        _pmSetModal('Confirm restore',
+            '<div style="text-align:left;"><div style="font-size:13px; margin-bottom:6px;"><b>' + src + '</b><br>Backup date: <b>' + _pmFmtDate(v.createdAt) + '</b></div>' + rows +
+            '<div style="font-size:12px; color:#C62828; margin:10px 0 6px;">This REPLACES all current Purchase Manager data with the above. A safety snapshot of the current data is saved first so you can undo. The POS is not touched.</div>' +
+            '<label style="font-size:12px; display:block; margin-bottom:3px;">Type <b>RESTORE</b> to continue</label>' +
+            '<input id="pm-restore-typed" type="text" autocomplete="off" autocorrect="off" autocapitalize="characters" spellcheck="false" style="margin:0; width:100%;"></div>',
+            _pmBtn('Cancel', 'pmRestoreCancel()', 'ghost') + _pmBtn('Restore', 'pmRestoreGo()', 'danger'));
+    }
+    function pmRestoreCancel() { window._pmRestorePending = null; closePmAlert(); }
+    async function pmRestoreGo() {
+        const inp = document.getElementById('pm-restore-typed');
+        if (!inp || inp.value.trim() !== 'RESTORE') { invToast('Type RESTORE exactly to continue'); return; }
+        const v = window._pmRestorePending; window._pmRestorePending = null;
+        if (!v) return;
+        if (!window._writeAllowed) { closePmAlert(); showCustomAlert('This copy is read-only — restore is disabled.'); return; }
+        if (_pmBkBusy) { closePmAlert(); showCustomAlert('A backup is running. Try again in a moment.'); return; }
+        _pmBkBusy = true;
+        const done = [];
+        let cur = null, safetyId = null;
+        try {
+            // Plan the writes (whitelist only; empty sections become a delete)
+            const upd = {};
+            PM_BK_NODES.forEach(n => { upd[n] = (v.data[n] == null || _pmCount(v.data[n]) === 0) ? null : v.data[n]; });
+            const sizes = {}; let total = 0;
+            PM_BK_NODES.forEach(n => { sizes[n] = upd[n] == null ? 0 : _pmBytes(upd[n]); total += sizes[n]; });
+            const tooBig = PM_BK_NODES.filter(n => sizes[n] > PM_RESTORE_NODE_MAX);
+            if (tooBig.length) throw new Error('Section "' + tooBig[0] + '" is ' + _pmMB(sizes[tooBig[0]]) + ' — too large to restore safely from the app. Nothing was changed.');
+
+            _pmSetModal('Restoring…', '<div style="font-size:13px;">Saving a safety snapshot of the current data first. Do not close this page.</div>', '');
+            const safety = await _pmBkDo('before-restore', {});     // throws if it cannot be confirmed → restore does not start
+            safetyId = safety.id; cur = safety.cur;
+            try { await _pmBkPrune(safety.id, 'before-restore', safety.iso); } catch (e) { console.error(e); }
+
+            _pmSetModal('Restoring…', '<div style="font-size:13px;">Writing data. Do not close this page.</div>', '');
+            if (total <= PM_RESTORE_ATOMIC_MAX) {
+                await window.dbUpdate(_pmRoot(), upd);               // one atomic multi-path write
+                PM_BK_NODES.forEach(n => done.push(n));
+            } else {
+                for (const n of PM_BK_NODES) {                       // safe order: suppliers first, meta last; each section is itself atomic
+                    await window.dbUpdate(_pmRoot(), { [n]: upd[n] });
+                    done.push(n);
+                }
+            }
+            // Confirm what landed
+            const bad = [];
+            for (const n of PM_BK_NODES) { if ((await _pmShallowCount(n)) !== v.counts[n]) bad.push(n); }
+            _pmBkMsg('Restored from ' + _pmFmtDate(v.createdAt), 'ok');
+            pmBkRefreshStatus();
+            if (typeof _pmRerenderActiveTab === 'function') _pmRerenderActiveTab();
+            if (bad.length) showCustomAlert('Restore finished, but these sections do not match the backup counts: <b>' + bad.join(', ') + '</b>. Other devices may have written at the same time. Check the data; to undo, restore snapshot <b>' + safetyId + '</b>.');
+            else showCustomAlert('✅ Restored from <b>' + _pmFmtDate(v.createdAt) + '</b>.<br><br>To undo, restore the snapshot <b>' + safetyId + '</b> (before-restore).');
+        } catch (e) {
+            console.error('[PM restore] failed', e);
+            let msg = 'Restore failed: ' + (e.message || e) + '.';
+            if (done.length || (cur && safetyId)) {
+                // Part-way failure on the multi-write path: put back what was replaced, using the data we just saved
+                if (done.length && done.length < PM_BK_NODES.length && cur) {
+                    try {
+                        const back = {}; PM_BK_NODES.forEach(n => { back[n] = cur[n] == null ? null : cur[n]; });
+                        await window.dbUpdate(_pmRoot(), back);
+                        msg += ' The previous data was put back automatically.';
+                    } catch (e2) { msg += ' Automatic rollback also failed — restore snapshot <b>' + safetyId + '</b> from the Restore list to get your previous data back.'; }
+                } else if (safetyId) msg += ' No data was changed. (Safety snapshot ' + safetyId + ' exists.)';
+            } else msg += ' No data was changed.';
+            _pmBkMsg('Restore failed', 'err');
+            showCustomAlert(msg);
+        } finally { _pmBkBusy = false; }
+    }
+
     // ── Boot ──
     document.addEventListener('DOMContentLoaded', async () => {
         await window.getAuthReadyPromise();
@@ -2153,6 +2580,7 @@ function computeCombinedAvgRate(metal){
         startSalesHedgeDatesSync();
         startManualOwedSync();
         pmSwitchTab('purchase');
+        pmAutoBackupStart();
     });
 </script>
 
