@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <title>Suhag Purchase Manager</title>
     <meta name="theme-color" content="#1a1a1a">
 
@@ -185,10 +185,14 @@
         }
         button { cursor: pointer; }
         /* ── Purchase Manager UI refresh ── */
-        #pm-brand { padding: 12px 16px 10px !important; }
+        html { background: #1a1a1a; }
+        body { background: #FFFFFF; }
+        #pm-brand { padding: calc(env(safe-area-inset-top, 0px) + 12px) 16px 10px !important; }
+        #pm-sup-full { padding-top: 0 !important; }
+        #pm-sup-full > div:first-child { padding-top: calc(env(safe-area-inset-top, 0px) + 12px) !important; }
         #pm-brand h1 { font-size: 17px !important; }
         #pm-brand .sub { margin-top: 0 !important; }
-        #pm-more-btn { top: 6px !important; width: 36px !important; height: 36px !important; }
+        #pm-more-btn { top: calc(env(safe-area-inset-top, 0px) + 6px) !important; width: 36px !important; height: 36px !important; }
         #pm-tabs > div { padding: 10px 4px !important; }
         #pm-pane-purchase button { border-radius: 12px; }
         #pm-pane-purchase [style*="box-shadow:0 1px 6px"], #pm-sup-body [style*="box-shadow:0 1px 6px"] { border-radius: var(--radius) !important; border: 1px solid #EDF3EE; }
