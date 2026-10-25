@@ -322,6 +322,7 @@
             <button onclick="deleteSelectedParty('purchase-party')" title="Delete this party" style="background:none; border:1.5px solid #e0e0e0; color:#C62828; font-size:16px; width:44px; flex-shrink:0; border-radius:10px; padding:0; margin:0;">🗑️</button>
         </div>
 
+        <div id="purchase-metal-weight-fields">
         <label style="font-size:12px; font-weight:700; color:#888; margin:0 0 4px 0;">METAL</label>
         <select id="purchase-metal" style="padding:10px 12px; border:1.5px solid #e0e0e0; border-radius:10px; width:100%; font-size:14px; margin-bottom:14px; box-sizing:border-box;">
             <option value="Gold">Gold</option>
@@ -331,6 +332,7 @@
         <label style="font-size:12px; font-weight:700; color:#888; margin:0 0 4px 0;">WEIGHT (24K/999 PURE-EQUIVALENT)</label>
         <input type="number" id="purchase-weight" placeholder="e.g. 12.5" step="0.01" min="0"
                style="padding:10px 12px; border:1.5px solid #e0e0e0; border-radius:10px; width:100%; font-size:14px; margin-bottom:14px; box-sizing:border-box;">
+        </div>
 
         <label style="font-size:12px; font-weight:700; color:#888; margin:0 0 4px 0;">DATE</label>
         <input type="date" id="purchase-date"
@@ -348,12 +350,26 @@
             </select>
         </div>
 
+        <div id="purchase-credit-type-row" style="display:none; margin-bottom:14px;">
+            <label style="font-size:12px; font-weight:700; color:#888; margin:0 0 4px 0;">CREDIT IN</label>
+            <select id="purchase-credit-type" onchange="onPurchaseCreditToggle()" style="padding:10px 12px; border:1.5px solid #e0e0e0; border-radius:10px; width:100%; font-size:14px; box-sizing:border-box;">
+                <option value="metal">Metal (grams)</option>
+                <option value="amount">Amount (₹)</option>
+            </select>
+        </div>
+
+        <div id="purchase-amount-field" style="display:none;">
+            <label style="font-size:12px; font-weight:700; color:#888; margin:0 0 4px 0;">AMOUNT ON CREDIT (₹)</label>
+            <input type="number" id="purchase-amount" placeholder="e.g. 50000" step="0.01" min="0"
+                   style="padding:10px 12px; border:1.5px solid #e0e0e0; border-radius:10px; width:100%; font-size:14px; margin-bottom:14px; box-sizing:border-box;">
+        </div>
+
         <div id="purchase-rate-field">
             <label style="font-size:12px; font-weight:700; color:#888; margin:0 0 4px 0;">RATE PAID (₹/gram)</label>
             <input type="number" id="purchase-rate" placeholder="e.g. 6250" step="0.01" min="0"
                    style="padding:10px 12px; border:1.5px solid #e0e0e0; border-radius:10px; width:100%; font-size:14px; margin-bottom:14px; box-sizing:border-box;">
         </div>
-        <p class="note" id="purchase-credit-note" style="display:none; margin:0 0 14px;">Credit purchases have no rate yet — you'll log Payments against this party separately, each at its own rate, as it's settled.</p>
+        <p class="note" id="purchase-credit-note" style="display:none; margin:0 0 14px;"><span id="purchase-credit-note-text">Credit purchases have no rate yet — you'll log Payments against this party separately, each at its own rate, as it's settled.</span></p>
 
         <label style="font-size:12px; font-weight:700; color:#888; margin:0 0 4px 0;">NOTE (OPTIONAL)</label>
         <input type="text" id="purchase-note" placeholder="e.g. Melt exchange, Cash purchase…"
@@ -399,10 +415,17 @@
 
         <label style="font-size:12px; font-weight:700; color:#888; margin:0 0 4px 0;">PARTY</label>
         <div style="display:flex; gap:8px; margin-bottom:14px;">
-            <select id="payment-party" onchange="onPaymentSelectionChange()" style="flex:1; padding:10px 12px; border:1.5px solid #e0e0e0; border-radius:10px; font-size:14px; box-sizing:border-box; margin:0;"></select>
+            <select id="payment-party" onchange="onPaymentPartyChange()" style="flex:1; padding:10px 12px; border:1.5px solid #e0e0e0; border-radius:10px; font-size:14px; box-sizing:border-box; margin:0;"></select>
             <button onclick="deleteSelectedParty('payment-party')" title="Delete this party" style="background:none; border:1.5px solid #e0e0e0; color:#C62828; font-size:16px; width:44px; flex-shrink:0; border-radius:10px; padding:0; margin:0;">🗑️</button>
         </div>
 
+        <label style="font-size:12px; font-weight:700; color:#888; margin:0 0 4px 0;">PAYING OFF</label>
+        <select id="payment-type" onchange="onPaymentSelectionChange()" style="padding:10px 12px; border:1.5px solid #e0e0e0; border-radius:10px; width:100%; font-size:14px; margin-bottom:14px; box-sizing:border-box;">
+            <option value="metal">Metal credit (grams)</option>
+            <option value="amount">Amount credit (₹)</option>
+        </select>
+
+        <div id="payment-metal-fields">
         <label style="font-size:12px; font-weight:700; color:#888; margin:0 0 4px 0;">METAL</label>
         <select id="payment-metal" onchange="onPaymentSelectionChange()" style="padding:10px 12px; border:1.5px solid #e0e0e0; border-radius:10px; width:100%; font-size:14px; margin-bottom:14px; box-sizing:border-box;">
             <option value="Gold">Gold</option>
@@ -412,14 +435,23 @@
         <label style="font-size:12px; font-weight:700; color:#888; margin:0 0 4px 0;">WEIGHT PAID</label>
         <input type="number" id="payment-weight" placeholder="e.g. 3" step="0.01" min="0"
                style="padding:10px 12px; border:1.5px solid #e0e0e0; border-radius:10px; width:100%; font-size:14px; margin-bottom:14px; box-sizing:border-box;">
+        </div>
+
+        <div id="payment-amount-field" style="display:none;">
+            <label style="font-size:12px; font-weight:700; color:#888; margin:0 0 4px 0;">AMOUNT PAID (₹)</label>
+            <input type="number" id="payment-amount" placeholder="e.g. 20000" step="0.01" min="0"
+                   style="padding:10px 12px; border:1.5px solid #e0e0e0; border-radius:10px; width:100%; font-size:14px; margin-bottom:14px; box-sizing:border-box;">
+        </div>
 
         <label style="font-size:12px; font-weight:700; color:#888; margin:0 0 4px 0;">DATE</label>
         <input type="date" id="payment-date"
                style="padding:10px 12px; border:1.5px solid #e0e0e0; border-radius:10px; width:100%; font-size:14px; margin-bottom:14px; box-sizing:border-box;">
 
+        <div id="payment-rate-field">
         <label style="font-size:12px; font-weight:700; color:#888; margin:0 0 4px 0;">RATE PAID (₹/gram)</label>
         <input type="number" id="payment-rate" placeholder="e.g. 6250 — leave blank if paid in metal" step="0.01" min="0"
                style="padding:10px 12px; border:1.5px solid #e0e0e0; border-radius:10px; width:100%; font-size:14px; margin-bottom:14px; box-sizing:border-box;">
+        </div>
 
         <label style="font-size:12px; font-weight:700; color:#888; margin:0 0 4px 0;">NOTE (OPTIONAL)</label>
         <input type="text" id="payment-note" placeholder="e.g. Partial 1 of 2"
@@ -810,6 +842,7 @@
         const totals = {};
         purchases.forEach(p => {
             if (p.planId) return;
+            if (p.creditType === 'amount') return;      // rupee credit carries no metal
             if (p.track !== track) return;
             if (new Date(p.createdAt) < startDate) return;
             totals[p.metal] = (totals[p.metal] || 0) + (p.weight || 0);
@@ -833,6 +866,19 @@
             .reduce((s, pay) => s + (pay.weight || 0), 0);
         return Math.max(0, purchased - paid);
     }
+
+    // Credit owed to a party in RUPEES (purchases logged as "Credit → Amount"),
+    // minus amount payments. Completely separate from the metal (grams) pool above.
+    function getPartyAmountBalance(partyId, track){
+        const owed = purchases
+            .filter(p => p.partyId === partyId && p.track === track && p.status === 'credit' && p.creditType === 'amount')
+            .reduce((s, p) => s + (p.amount || 0), 0);
+        const paid = payments
+            .filter(pay => pay.partyId === partyId && pay.track === track && pay.payType === 'amount')
+            .reduce((s, pay) => s + (pay.amount || 0), 0);
+        return Math.max(0, owed - paid);
+    }
+    const _pmRs = n => '₹' + (Math.round((n || 0) * 100) / 100).toLocaleString('en-IN', { maximumFractionDigits: 2 });
 
     function getPartyName(partyId){
         const p = parties.find(x => x.id === partyId);
@@ -988,7 +1034,7 @@ function computeCombinedAvgRate(metal){
         return `
             <div style="display:flex; justify-content:space-between; align-items:center; background:var(--surface); border-radius:var(--radius); padding:10px 14px; margin-bottom:8px; box-shadow:0 1px 6px rgba(0,0,0,.06); ${p.status === 'credit' ? 'border-left:3px solid #FB8C00;' : ''}">
                 <div style="font-size:12.5px;">
-                    <b>${partyName}</b> · ${p.metal} · ${(p.weight || 0).toFixed(2)}g ${p.status === 'paid' ? `@ ₹${(p.rate || 0).toFixed(2)}/g` : '<span style="color:#FB8C00;">(credit)</span>'}
+                    <b>${partyName}</b> · ${p.creditType === 'amount' ? `${_pmRs(p.amount)} <span style="color:#FB8C00;">(credit — amount)</span>` : `${p.metal} · ${(p.weight || 0).toFixed(2)}g ${p.status === 'paid' ? `@ ₹${(p.rate || 0).toFixed(2)}/g` : '<span style="color:#FB8C00;">(credit)</span>'}`}
                     <div style="font-size:10.5px; color:var(--text2);">${p.date || ''}${p.note ? ' · ' + p.note.replace(/</g, '&lt;') : ''}</div>
                 </div>
                 <div style="display:flex; align-items:center; gap:8px;">
@@ -1232,9 +1278,17 @@ function computeCombinedAvgRate(metal){
     // locking in the rate right away so that particular transaction can't
     // end up a loss; leaving it on open credit would defeat that.
     function onPurchaseCreditToggle(){
-        const isCredit = document.getElementById('purchase-status').value === 'credit';
-        document.getElementById('purchase-rate-field').style.display = isCredit ? 'none' : 'block';
-        document.getElementById('purchase-credit-note').style.display = isCredit ? 'block' : 'none';
+        const g = id => document.getElementById(id);
+        const isCredit = g('purchase-status').value === 'credit' && g('purchase-status-row').style.display !== 'none';
+        const isAmount = isCredit && g('purchase-credit-type').value === 'amount';
+        g('purchase-credit-type-row').style.display = isCredit ? 'block' : 'none';
+        g('purchase-metal-weight-fields').style.display = isAmount ? 'none' : 'block';
+        g('purchase-amount-field').style.display = isAmount ? 'block' : 'none';
+        g('purchase-rate-field').style.display = isCredit ? 'none' : 'block';
+        g('purchase-credit-note').style.display = isCredit ? 'block' : 'none';
+        g('purchase-credit-note-text').textContent = isAmount
+            ? 'This is a rupee amount you owe the supplier — no metal is counted. You will log a Payment (Amount) against this party as you settle it.'
+            : "Credit purchases have no rate yet — you'll log Payments against this party separately, each at its own rate, as it's settled.";
     }
 
     // Selecting "+ New Party…" prompts right away, instead of waiting
@@ -1302,6 +1356,9 @@ function computeCombinedAvgRate(metal){
         document.getElementById('purchase-date').value = existing ? existing.date : new Date().toISOString().slice(0, 10);
         document.getElementById('purchase-rate').value = (existing && existing.status === 'paid') ? existing.rate : '';
         document.getElementById('purchase-note').value = existing ? (existing.note || '') : '';
+        document.getElementById('purchase-amount').value = (existing && existing.creditType === 'amount') ? existing.amount : '';
+        document.getElementById('purchase-credit-type').value = (existing && existing.creditType === 'amount') ? 'amount' : 'metal';
+        document.getElementById('purchase-credit-type').disabled = editing;
 
         const trackRow = document.getElementById('purchase-track-row');
         const statusRow = document.getElementById('purchase-status-row');
@@ -1337,6 +1394,8 @@ function computeCombinedAvgRate(metal){
         const status = planId ? 'paid' : document.getElementById('purchase-status').value;
         const rate = parseFloat(document.getElementById('purchase-rate').value) || 0;
         const note = document.getElementById('purchase-note').value.trim();
+        const isAmount = !planId && status === 'credit' && document.getElementById('purchase-credit-type').value === 'amount';
+        const amount = parseFloat(document.getElementById('purchase-amount').value) || 0;
 
         if (partyId === '__new__') {
             const name = prompt('New party name:');
@@ -1345,7 +1404,8 @@ function computeCombinedAvgRate(metal){
             if (!partyId) return;
         }
         if (!partyId) { showCustomAlert('Select a party.'); return; }
-        if (weight <= 0) { showCustomAlert('Enter weight purchased.'); return; }
+        if (isAmount) { if (amount <= 0) { showCustomAlert('Enter the amount on credit.'); return; } }
+        else if (weight <= 0) { showCustomAlert('Enter weight purchased.'); return; }
         if (!dateVal) { showCustomAlert('Enter the date of purchase.'); return; }
         if (status === 'paid' && !rate) { showCustomAlert('Enter the rate paid.'); return; }
 
@@ -1357,6 +1417,7 @@ function computeCombinedAvgRate(metal){
             if (!existing) { closePurchaseModal(); return; }
             const updated = { ...existing, partyId, metal, weight, date: dateVal, createdAt, note: note || null };
             if (existing.status === 'paid') updated.rate = rate;
+            if (existing.creditType === 'amount') { updated.amount = amount; updated.metal = ''; updated.weight = 0; }
             try {
                 await window.dbUpdate(window.dbRef(window.firebaseDB, 'purchases'), { [purchaseId]: updated });
                 Object.assign(existing, updated);
@@ -1372,6 +1433,7 @@ function computeCombinedAvgRate(metal){
         const id = crypto.randomUUID();
         const entry = { id, partyId, planId, track, metal, weight, date: dateVal, createdAt, status, note: note || null };
         if (status === 'paid') entry.rate = rate;
+        if (isAmount) { entry.creditType = 'amount'; entry.amount = amount; entry.metal = ''; entry.weight = 0; }
         try {
             await window.dbUpdate(window.dbRef(window.firebaseDB, 'purchases'), { [id]: entry });
             // Not pushing into the local `purchases` array here — the live
@@ -1407,12 +1469,30 @@ function computeCombinedAvgRate(metal){
     // with a live "X g outstanding" note that updates as either changes,
     // and the same over-payment guard as before.
     function onPaymentSelectionChange(){
-        const partyId = document.getElementById('payment-party').value;
-        const metal = document.getElementById('payment-metal').value;
-        const bal = partyId ? getPartyCreditBalance(partyId, currentInvTrack, metal) : 0;
-        document.getElementById('payment-balance-note').textContent = partyId
-            ? `${bal.toFixed(2)}g outstanding for ${getPartyName(partyId)} (${metal}).`
-            : '';
+        const g = id => document.getElementById(id);
+        const partyId = g('payment-party').value;
+        const isAmt = g('payment-type').value === 'amount';
+        g('payment-metal-fields').style.display = isAmt ? 'none' : 'block';
+        g('payment-rate-field').style.display = isAmt ? 'none' : 'block';
+        g('payment-amount-field').style.display = isAmt ? 'block' : 'none';
+        if (!partyId) { g('payment-balance-note').textContent = ''; return; }
+        if (isAmt) {
+            g('payment-balance-note').textContent = `${_pmRs(getPartyAmountBalance(partyId, currentInvTrack))} outstanding for ${getPartyName(partyId)} (amount credit).`;
+        } else {
+            const metal = g('payment-metal').value;
+            g('payment-balance-note').textContent = `${getPartyCreditBalance(partyId, currentInvTrack, metal).toFixed(2)}g outstanding for ${getPartyName(partyId)} (${metal}).`;
+        }
+    }
+    // Changing party: if the chosen type has nothing outstanding but the other does, switch to it.
+    function onPaymentPartyChange(){
+        const partyId = document.getElementById('payment-party').value, typeEl = document.getElementById('payment-type');
+        if (partyId) {
+            const metalBal = getPartyCreditBalance(partyId, currentInvTrack, 'Gold') + getPartyCreditBalance(partyId, currentInvTrack, 'Silver');
+            const amtBal = getPartyAmountBalance(partyId, currentInvTrack);
+            if (typeEl.value === 'metal' && metalBal <= 0.001 && amtBal > 0.001) typeEl.value = 'amount';
+            else if (typeEl.value === 'amount' && amtBal <= 0.001 && metalBal > 0.001) typeEl.value = 'metal';
+        }
+        onPaymentSelectionChange();
     }
 
     // Only parties with actual outstanding credit (in either metal, on
@@ -1422,7 +1502,8 @@ function computeCombinedAvgRate(metal){
         const select = document.getElementById('payment-party');
         const eligible = parties.filter(p =>
             getPartyCreditBalance(p.id, currentInvTrack, 'Gold') > 0.001 ||
-            getPartyCreditBalance(p.id, currentInvTrack, 'Silver') > 0.001
+            getPartyCreditBalance(p.id, currentInvTrack, 'Silver') > 0.001 ||
+            getPartyAmountBalance(p.id, currentInvTrack) > 0.001
         );
         select.innerHTML = eligible.map(p => `<option value="${p.id}">${p.name.replace(/</g, '&lt;')}</option>`).join('');
         return eligible;
@@ -1432,11 +1513,13 @@ function computeCombinedAvgRate(metal){
         const eligible = _rebuildPaymentPartyDropdown();
         if (!eligible.length) { showCustomAlert('No parties have outstanding credit right now.'); return; }
         document.getElementById('payment-metal').value = 'Gold';
+        document.getElementById('payment-type').value = 'metal';
+        document.getElementById('payment-amount').value = '';
         document.getElementById('payment-weight').value = '';
         document.getElementById('payment-date').value = new Date().toISOString().slice(0, 10);
         document.getElementById('payment-rate').value = '';
         document.getElementById('payment-note').value = '';
-        onPaymentSelectionChange();
+        onPaymentPartyChange();
         document.getElementById('payment-modal').classList.add('show');
     }
 
@@ -1451,6 +1534,21 @@ function computeCombinedAvgRate(metal){
         const dateVal = document.getElementById('payment-date').value;
         const rate = parseFloat(document.getElementById('payment-rate').value) || 0;
         const note = document.getElementById('payment-note').value.trim();
+        if (document.getElementById('payment-type').value === 'amount') {
+            const amount = parseFloat(document.getElementById('payment-amount').value) || 0;
+            if (amount <= 0) { showCustomAlert('Enter the amount paid.'); return; }
+            if (!dateVal) { showCustomAlert('Enter the payment date.'); return; }
+            const availAmt = getPartyAmountBalance(partyId, currentInvTrack);
+            if (amount > availAmt + 0.01) { showCustomAlert(`That's more than the ${_pmRs(availAmt)} still outstanding.`); return; }
+            const idA = crypto.randomUUID();
+            const entryA = { id: idA, partyId, track: currentInvTrack, payType: 'amount', amount, note: note || null, date: dateVal, createdAt: new Date(dateVal + 'T12:00:00.000Z').toISOString() };
+            try { await window.dbUpdate(window.dbRef(window.firebaseDB, 'payments'), { [idA]: entryA }); closePaymentModal(); }
+            catch (e) {
+                console.error('[Payments] save failed', e);
+                showCustomAlert(window._writeAllowed ? 'Could not save — try again.' : 'Writes are disabled — this copy is running in read-only mode.');
+            }
+            return;
+        }
         if (weight <= 0) { showCustomAlert('Enter weight paid.'); return; }
         if (!dateVal) { showCustomAlert('Enter the payment date.'); return; }
 
