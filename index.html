@@ -8,7 +8,7 @@
 
     <link rel="manifest" href="manifest.json">
     <meta name="apple-mobile-web-app-capable" content="yes">
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black">
     <meta name="apple-mobile-web-app-title" content="SPM">
     <link rel="apple-touch-icon" href="icon-192.png">
     <link rel="icon" href="icon-192.png">
@@ -250,6 +250,7 @@
     <div id="pm-more-backdrop" onclick="pmMoreClose()"></div>
     <div id="pm-more-menu">
         <button onclick="pmMoreGo(pmSupOpen)">👥 Supplier list</button>
+        <button onclick="pmMoreGo(() => location.reload())">🔄 Refresh</button>
         <div class="sep"></div>
         <button onclick="pmMoreGo(pmAvOpen)">🗄 Archive viewer</button>
         <button onclick="pmMoreGo(pmBackupMenuOpen)">☁ Backup &amp; restore</button>
