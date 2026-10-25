@@ -136,6 +136,33 @@
             background: #ff80ab; color: white; font-size: 11px; font-weight: 700;
             padding: 3px 10px; border-radius: 20px;
         }
+        #pm-brand { position: relative; }
+        #pm-more-btn {
+            display: none; position: absolute; top: 12px; right: 12px; width: 40px; height: 40px;
+            align-items: center; justify-content: center; padding: 0 0 4px; margin: 0;
+            border: none; border-radius: 50%; background: rgba(255,255,255,.14); color: white;
+            font-size: 24px; font-weight: 800; line-height: 1;
+        }
+        #pm-more-btn:active { background: rgba(255,255,255,.28); }
+        #pm-more-backdrop { display: none; position: fixed; inset: 0; z-index: 1190; }
+        #pm-more-menu {
+            display: none; position: fixed; top: 64px; right: 12px; min-width: 240px; z-index: 1200;
+            background: white; border: 1px solid var(--border); border-radius: 14px;
+            box-shadow: 0 8px 28px rgba(0,0,0,.22); padding: 6px;
+        }
+        #pm-more-menu button {
+            display: flex; align-items: center; gap: 10px; width: 100%; margin: 0; padding: 12px;
+            border: none; border-radius: 9px; background: transparent; box-shadow: none;
+            font-size: 14px; font-weight: 600; color: var(--text); text-align: left;
+        }
+        #pm-more-menu button:active { background: #F1F8F2; }
+        #pm-more-menu button.danger { color: #C62828; }
+        #pm-more-menu .sep { height: 1px; background: #eee; margin: 4px 8px; }
+        #pm-av-full {
+            display: none; position: fixed; inset: 0; z-index: 1100; flex-direction: column;
+            background: #F7F7F5; padding-top: env(safe-area-inset-top, 0px);
+        }
+        #pm-av-body { flex: 1; overflow-y: auto; padding: 14px; max-width: 720px; margin: 0 auto; width: 100%; box-sizing: border-box; }
         #pm-content { flex: 1; overflow-y: auto; padding: 14px; max-width: 600px; margin: 0 auto; width: 100%; box-sizing: border-box; }
 
         #purchase-modal, #payment-modal, #manual-owed-modal, #piece-bill-modal, #pm-alert-modal {
@@ -176,12 +203,37 @@
         <h1>SUHAG JEWELLERS</h1>
         <div class="sub">Purchase Manager</div>
         <div id="pm-track-pill">TRACK B</div>
+        <button id="pm-more-btn" onclick="event.stopPropagation(); pmMoreToggle()" aria-label="More">⋯</button>
     </div>
 
     <div id="pm-tabs" style="display:flex; border-bottom:1px solid var(--border); background:var(--surface);">
         <div id="pm-tab-sales" onclick="pmSwitchTab('sales')" style="flex:1; display:flex; align-items:center; justify-content:center; padding:13px 4px; font-size:13px; font-weight:700; border-right:1px solid var(--border); background:transparent; cursor:pointer; color:var(--text2); text-align:center; user-select:none;">📈 Sales</div>
         <div id="pm-tab-purchase" onclick="pmSwitchTab('purchase')" style="flex:1; display:flex; align-items:center; justify-content:center; padding:13px 4px; font-size:13px; font-weight:700; background:transparent; cursor:pointer; color:var(--text2); text-align:center; user-select:none;">🛒 Purchase</div>
         <div id="pm-tab-report" onclick="pmSwitchTab('report')" style="display:none; flex:1; align-items:center; justify-content:center; padding:13px 4px; font-size:13px; font-weight:700; border-left:1px solid var(--border); background:transparent; cursor:pointer; color:var(--text2); text-align:center; user-select:none;">📊 Report</div>
+    </div>
+
+    <input type="file" id="pm-av-file" multiple accept=".json,application/json" style="display:none;" onchange="pmAvFilesChosen(this)">
+    <input type="file" id="pm-restore-file" accept=".json,application/json" style="display:none;" onchange="pmRestoreFileChosen(this)">
+
+    <!-- "More" dropdown (Track B only) -->
+    <div id="pm-more-backdrop" onclick="pmMoreClose()"></div>
+    <div id="pm-more-menu">
+        <button onclick="pmMoreGo(pmAvOpen)">🗄 Archive viewer</button>
+        <button onclick="pmMoreGo(pmBackupMenuOpen)">☁ Backup &amp; restore</button>
+        <button onclick="pmMoreGo(pmArchiveMenuOpen)">📦 Archive data</button>
+        <button onclick="pmMoreGo(pmExportMenuOpen)">⬇ Export CSV</button>
+        <div class="sep"></div>
+        <button class="danger" onclick="pmMoreGo(pmDeleteMenuOpen)">🗑 Delete old data</button>
+    </div>
+
+    <!-- Archive viewer: full-screen window -->
+    <div id="pm-av-full">
+        <div id="pm-av-banner"></div>
+        <div style="display:flex; background:white; border-bottom:1px solid var(--border);">
+            <div id="pm-av-tab-sales" onclick="pmAvTab('sales')" style="flex:1; text-align:center; padding:12px 4px; font-size:13px; font-weight:700; cursor:pointer; user-select:none; border-bottom:3px solid transparent;">📈 Sales</div>
+            <div id="pm-av-tab-report" onclick="pmAvTab('report')" style="flex:1; text-align:center; padding:12px 4px; font-size:13px; font-weight:700; cursor:pointer; user-select:none; border-bottom:3px solid transparent;">📊 Report</div>
+        </div>
+        <div id="pm-av-body"></div>
     </div>
 
     <div id="pm-content">
@@ -224,28 +276,6 @@
                 </div>
             </div>
             <div id="rp-body"></div>
-            <div style="background:var(--surface); border-radius:var(--radius); padding:14px; box-shadow:0 1px 6px rgba(0,0,0,.06); margin-bottom:12px;">
-                <div style="font-size:10px; font-weight:700; letter-spacing:.08em; color:var(--text2); text-transform:uppercase; margin-bottom:10px;">Data</div>
-                <button onclick="rpExportCsv()" style="width:100%; padding:10px; font-size:13px; font-weight:700; border:1.5px solid var(--border); border-radius:10px; background:white; color:var(--text); margin-bottom:12px;">⬇ Export this period (CSV)</button>
-                <div style="border-top:1px solid var(--border); padding-top:10px; margin-bottom:12px;">
-                    <div style="font-size:11px; font-weight:700; margin-bottom:4px;">Cloud backup</div>
-                    <div id="pm-bk-last" class="note" style="margin-bottom:2px;">Last cloud backup: checking…</div>
-                    <div id="pm-bk-msg" class="note" style="margin-bottom:8px; min-height:14px;"></div>
-                    <div style="display:flex; gap:8px; margin-bottom:8px;">
-                        <button onclick="pmBkManual()" style="flex:1; padding:10px; font-size:12px; font-weight:700; border:1.5px solid var(--border); border-radius:10px; background:white; color:var(--text);">☁ Back up now</button>
-                        <button onclick="pmBkDownloadFile()" style="flex:1; padding:10px; font-size:12px; font-weight:700; border:1.5px solid var(--border); border-radius:10px; background:white; color:var(--text);">⬇ Download backup file</button>
-                    </div>
-                    <button onclick="pmRestoreOpen()" style="width:100%; padding:10px; font-size:12px; font-weight:700; border:1.5px solid #C62828; border-radius:10px; background:white; color:#C62828;">↩ Restore…</button>
-                    <input type="file" id="pm-restore-file" accept=".json,application/json" style="display:none;" onchange="pmRestoreFileChosen(this)">
-                </div>
-                <label style="font-size:11px; display:block; margin-bottom:3px;">Delete everything before</label>
-                <input type="date" id="rp-del-date" style="margin:0 0 8px;">
-                <div style="display:flex; gap:8px;">
-                    <button onclick="rpDeleteBefore('cashbook')" style="flex:1; padding:10px; font-size:12px; font-weight:700; border:1.5px solid #C62828; border-radius:10px; background:white; color:#C62828;">Delete cash book</button>
-                    <button onclick="rpDeleteBefore('sales')" style="flex:1; padding:10px; font-size:12px; font-weight:700; border:1.5px solid #C62828; border-radius:10px; background:white; color:#C62828;">Delete sales</button>
-                </div>
-                <p class="note" style="margin:8px 0 0;">A backup file downloads first. This only affects the Purchase Manager — the POS is never touched, and clearing the POS never affects this data.</p>
-            </div>
         </div>
 
         <div id="pm-pane-purchase" style="display:none;">
@@ -494,6 +524,9 @@
     function _pmApplyTrackUi(){
         const rt = document.getElementById('pm-tab-report');
         if (rt) rt.style.display = currentInvTrack === 'B' ? 'flex' : 'none';   // Report: Track B only
+        const mb = document.getElementById('pm-more-btn');
+        if (mb) mb.style.display = currentInvTrack === 'B' ? 'flex' : 'none';   // More menu: Track B only
+        if (currentInvTrack !== 'B') pmMoreClose();
         if (currentInvTrack !== 'B' && _pmActiveTab === 'report') pmSwitchTab('purchase');
     }
     function pmHandleBrandTap() {
@@ -1640,7 +1673,7 @@ function computeCombinedAvgRate(metal){
         return { dir: 'out', group: e.categoryName || (isSup ? 'Supplier' : 'Unassigned'), account: (isSup && e.supplier && e.supplier.partyName) ? e.supplier.partyName : (e.accountName || 'Unassigned') };
     }
     function _rpTrackOk(t){ return t === 'B'; }   // Report is Track B data only
-    function _rpEntries(from, to){ return cashbook.filter(e => _rpTrackOk(e.track || 'A') && e.date >= from && e.date <= to); }
+    function _rpEntries(from, to){ return _pmCashSrc().filter(e => _rpTrackOk(e.track || 'A') && e.date >= from && e.date <= to); }
     function _rpTotals(entries){
         const t = { in: 0, out: 0, inCash: 0, inDig: 0, outCash: 0, outDig: 0 };
         entries.forEach(e => {
@@ -1814,7 +1847,7 @@ function computeCombinedAvgRate(metal){
 
         // 7. Metal position
         const sold = { Gold: 0, Silver: 0 };
-        invoiceHistory.forEach(inv => {
+        _pmSalesSrc().forEach(inv => {
             if (inv.draft || !_rpTrackOk(inv.track)) return;
             const d = _rpDate(new Date(inv.timestamp)); if (d < from || d > to) return;
             (inv.items || []).forEach(it => { const mw = getInvoiceItemPureGrams(it); if (mw && sold[mw.metal] !== undefined) sold[mw.metal] += mw.weight; });
@@ -1830,13 +1863,14 @@ function computeCombinedAvgRate(metal){
         body.innerHTML = html;
     }
 
-    function rpExportCsv(){
-        const rows = _rpEntries(_rpRange.from, _rpRange.to).sort((a, b) => new Date(a.ts) - new Date(b.ts));
+    function rpExportCsv(from, to){
+        from = from || _rpRange.from; to = to || _rpRange.to;
+        const rows = _rpEntries(from, to).sort((a, b) => new Date(a.ts) - new Date(b.ts));
         if (!rows.length) { showCustomAlert('Nothing to export in this range.'); return; }
         const q = v => '"' + String(v == null ? '' : v).replace(/"/g, '""') + '"';
         const lines = [['Date','Direction','Category','Account / Party','Mode','Amount','Note'].map(q).join(',')];
         rows.forEach(e => { const c = _rpClassify(e); lines.push([e.date, c.dir === 'in' ? 'In' : 'Out', c.group, c.account, e.mode || (e.cashPortion !== undefined && e.cashPortion < e.amount ? 'mixed' : 'cash'), e.amount, e.note || ''].map(q).join(',')); });
-        _rpDownload('report_' + _rpRange.from + '_to_' + _rpRange.to + '.csv', lines.join('\n'), 'text/csv');
+        _rpDownload('report_' + from + '_to_' + to + '.csv', lines.join('\n'), 'text/csv');
     }
     function _rpDownload(name, text, type){
         const blob = new Blob([text], { type: type || 'application/json' });
@@ -1846,6 +1880,7 @@ function computeCombinedAvgRate(metal){
     }
     // Purchase Manager's own cleanup — independent of anything cleared in the POS.
     function rpDeleteBefore(kind){
+        if (_pmAvBlocked()) return;
         const d = document.getElementById('rp-del-date').value;
         if (!d) { showCustomAlert('Pick the cut-off date first. Everything BEFORE it will be deleted.'); return; }
         const list = kind === 'cashbook'
@@ -1853,7 +1888,9 @@ function computeCombinedAvgRate(metal){
             : invoiceHistory.filter(i => _rpDate(new Date(i.timestamp)) < d);
         if (!list.length) { showCustomAlert('Nothing found before ' + d + '.'); return; }
         _rpDownload('pm_' + kind + '_before_' + d + '.json', JSON.stringify(list, null, 2));
-        showCustomConfirm('A backup file was just downloaded. Delete <b>' + list.length + '</b> ' + (kind === 'cashbook' ? 'cash book entries' : 'invoices') + ' dated before <b>' + d + '</b> from the Purchase Manager? This does not touch the POS and cannot be undone.', 'Confirm delete', async () => {
+        showCustomConfirm('A backup file was just downloaded. Delete <b>' + list.length + '</b> ' + (kind === 'cashbook' ? 'cash book entries' : 'invoices') + ' dated before <b>' + d + '</b> from the Purchase Manager? This does not touch the POS and cannot be undone.' + _pmDelSalesWarn(kind, d), 'Confirm delete', async () => {
+            if (_pmAvBlocked()) return;
+            if (!(await _pmDelArchiveGate(kind, list, d))) return;
             const node = kind === 'cashbook' ? 'cashbook' : 'pmSales';
             if (window._writeAllowed) {
                 invToast('Saving cloud backup first…', 6000);
@@ -1894,6 +1931,7 @@ function computeCombinedAvgRate(metal){
     // ── Tab switcher ──
     let _pmActiveTab = 'purchase';
     function pmSwitchTab(name){
+        if (_pmAv.active && name === 'purchase') name = 'sales';   // viewer mode: Purchase tab is hidden
         _pmActiveTab = name;
         document.getElementById('pm-pane-sales').style.display = name === 'sales' ? '' : 'none';
         document.getElementById('pm-pane-purchase').style.display = name === 'purchase' ? '' : 'none';
@@ -1937,7 +1975,7 @@ function computeCombinedAvgRate(metal){
             to   = new Date(today.getFullYear(), today.getMonth(), 0);
         }
         if (k === 'all') {
-            const sorted = [...invoiceHistory].sort((a,b) => new Date(a.timestamp) - new Date(b.timestamp));
+            const sorted = [..._pmSalesSrc()].sort((a,b) => new Date(a.timestamp) - new Date(b.timestamp));
             from = sorted.length ? new Date(sorted[0].timestamp) : today;
         }
         document.getElementById(`inv-${target}-from`).value = invFmtDate(from);
@@ -1977,7 +2015,7 @@ function computeCombinedAvgRate(metal){
         const fromD = new Date(fromVal + 'T00:00:00');
         const toD = new Date(toVal + 'T23:59:59');
 
-        const inRange = invoiceHistory.filter(inv => {
+        const inRange = _pmSalesSrc().filter(inv => {
             const t = new Date(inv.timestamp);
             if (t < fromD || t > toD) return false;
             if (inv.track !== currentInvTrack) return false;
@@ -2359,6 +2397,7 @@ function computeCombinedAvgRate(metal){
     // ── Public: take a snapshot with locking, status and safe failure ──
     async function pmBackupNow(kind, opts) {
         opts = opts || {};
+        if (_pmAv.active) { if (!opts.silent) showCustomAlert('The archive viewer is read-only. Exit the viewer first.'); return { ok: false, reason: 'viewer' }; }
         if (!window._writeAllowed) {
             _pmBkMsg('Cloud backup: read-only copy — skipped', 'warn');
             if (!opts.silent) showCustomAlert('This copy is read-only, so cloud backups are skipped. Open the official app to back up.');
@@ -2463,6 +2502,7 @@ function computeCombinedAvgRate(metal){
         return { ok: true, createdAt: o.createdAt, createdFrom: o.createdFrom || 'file', counts: o.counts, data };
     }
     function pmRestoreOpen() {
+        if (_pmAvBlocked()) return;
         if (!window._writeAllowed) { showCustomAlert('This copy is read-only — restore is disabled. Open the official app to restore.'); return; }
         _pmSetModal('Restore Purchase Manager data',
             '<div style="text-align:left; font-size:13px;">Choose where to restore from. This replaces ALL Purchase Manager data (suppliers, purchases, payments, piece supplies, owed log, cash book, sales copy). The POS data is never touched.</div>',
@@ -2514,6 +2554,7 @@ function computeCombinedAvgRate(metal){
     }
     function pmRestoreCancel() { window._pmRestorePending = null; closePmAlert(); }
     async function pmRestoreGo() {
+        if (_pmAvBlocked()) return;
         const inp = document.getElementById('pm-restore-typed');
         if (!inp || inp.value.trim() !== 'RESTORE') { invToast('Type RESTORE exactly to continue'); return; }
         const v = window._pmRestorePending; window._pmRestorePending = null;
@@ -2571,6 +2612,584 @@ function computeCombinedAvgRate(metal){
             _pmBkMsg('Restore failed', 'err');
             showCustomAlert(msg);
         } finally { _pmBkBusy = false; }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // MONTHLY ARCHIVE (sales + cash book) and read-only ARCHIVE VIEWER
+    // Archive lives at pmArchive/{YYYY-MM}/{sales|cashbook}/{id} and pmArchive/{YYYY-MM}/meta.
+    // It is NOT part of pmBackups / PM_BK_NODES. Nothing here ever restores archive data into live data.
+    // The viewer never replaces invoiceHistory / cashbook: the accessors below hand a merged copy
+    // only to the report screens that call them, and only while the viewer is active.
+    // ═══════════════════════════════════════════════════════════════════
+    const PM_AR_VERSION = 1;
+    const PM_AR_APP = 'suhag-pm-archive';
+    const PM_AR_CHUNK = PM_BK_CHUNK;                  // ~3 MB per cloud write (Firebase limit is 16 MB)
+    const _pmMonthRe = /^\d{4}-(0[1-9]|1[0-2])$/;
+    const _pmDayRe = /^\d{4}-\d{2}-\d{2}$/;
+    const _pmAv = { active: false, from: '', to: '', cloud: {}, files: [], ver: 0, nextId: 1 };
+    let _pmAvCache = null;
+    let _pmArBusy = false;
+    const _pmArDownloaded = {};                       // months whose file was prepared + Save tapped in this session
+
+    function _pmAvBlocked(silent) {
+        if (!_pmAv.active) return false;
+        if (!silent) showCustomAlert('The archive viewer is read-only. Exit the viewer first.');
+        return true;
+    }
+    function _pmAsObj(v) {                            // Firebase may return an array when keys look like 0,1,2…
+        if (v == null || typeof v !== 'object') return {};
+        if (Array.isArray(v)) { const o = {}; v.forEach((x, i) => { if (x != null) o[i] = x; }); return o; }
+        return v;
+    }
+    function _pmNorm(v) {
+        if (v === null || v === undefined) return null;
+        if (Array.isArray(v)) return v.map(_pmNorm);
+        if (typeof v === 'object') {
+            const o = {};
+            Object.keys(v).sort().forEach(k => {
+                const n = _pmNorm(v[k]);
+                if (n === null) return;
+                if (typeof n === 'object' && (Array.isArray(n) ? !n.length : !Object.keys(n).length)) return;
+                o[k] = n;
+            });
+            return o;
+        }
+        return v;
+    }
+    function _pmStable(v) { return JSON.stringify(_pmNorm(v)); }
+    function _pmArSaleDay(inv) { const t = new Date(inv && inv.timestamp); return isNaN(t) ? '' : _rpDate(t); }
+    function _pmArRecDay(kind, r) {
+        if (kind === 'cashbook') return (r && typeof r.date === 'string' && _pmDayRe.test(r.date)) ? r.date : '';
+        return _pmArSaleDay(r);
+    }
+    function _pmMonthsBetween(from, to) {
+        const out = []; let y = +from.slice(0, 4), m = +from.slice(5, 7); const ey = +to.slice(0, 4), em = +to.slice(5, 7);
+        while (y < ey || (y === ey && m <= em)) { out.push(y + '-' + String(m).padStart(2, '0')); m++; if (m > 12) { m = 1; y++; } }
+        return out;
+    }
+    function _pmArMsg(text, level) {
+        const el = document.getElementById('pm-ar-msg'); if (!el) return;
+        el.textContent = text || '';
+        el.style.color = level === 'err' ? '#C62828' : level === 'warn' ? '#E65100' : 'var(--text2)';
+    }
+    async function _pmArReadMonth(m) {
+        const v = (await window.dbGet(_pmRefAt('pmArchive/' + m))).val();
+        const o = (v && typeof v === 'object') ? v : {};
+        return { sales: _pmAsObj(o.sales), cashbook: _pmAsObj(o.cashbook), meta: (o.meta && typeof o.meta === 'object') ? o.meta : null };
+    }
+
+    // ── Archive a date range (replaces that range in the archive; live data is never changed) ──
+    async function pmArchiveRange(from, to, opts) {
+        opts = opts || {};
+        const res = (ok, reason, msg, extra) => { if (!ok && !opts.silent) showCustomAlert(_rpEsc(msg)); _pmArMsg(msg, ok ? 'ok' : 'err'); return Object.assign({ ok, reason, msg }, extra || {}); };
+        if (_pmAv.active) return res(false, 'viewer', 'The archive viewer is read-only. Exit the viewer first.');
+        if (!window._writeAllowed) return res(false, 'readonly', 'This copy is read-only, so archive writes were skipped. Open the official app to archive.');
+        if (!_pmDayRe.test(from || '') || !_pmDayRe.test(to || '') || from > to) return res(false, 'range', 'Pick a valid From and To date (From must not be after To).');
+        if (_pmArBusy || _pmBkBusy) return res(false, 'busy', 'Another archive, backup or restore is running. Try again in a moment.');
+        _pmArBusy = true;
+        const touched = [];                           // months where a cloud write has started
+        try {
+            _pmArMsg('Reading live data…');
+            const [sSnap, cSnap] = await Promise.all([window.dbGet(_pmRefAt('pmSales')), window.dbGet(_pmRefAt('cashbook'))]);
+            const liveS = _pmAsObj(sSnap.val()), liveC = _pmAsObj(cSnap.val());
+            const months = _pmMonthsBetween(from, to);
+            const live = {}; months.forEach(m => { live[m] = { sales: {}, cashbook: {} }; });
+            let skipped = 0, nLiveS = 0, nLiveC = 0;
+            const pick = (kind, src) => Object.keys(src).forEach(id => {
+                const r = src[id]; if (!r || typeof r !== 'object') return;
+                const d = _pmArRecDay(kind, r);
+                if (!d) { skipped++; return; }
+                if (d < from || d > to) return;
+                if (!id || /[.$#\[\]\/]/.test(id)) throw new Error('Record id "' + id + '" has characters Firebase does not allow in a key');
+                live[d.slice(0, 7)][kind][id] = r;
+                if (kind === 'sales') nLiveS++; else nLiveC++;
+            });
+            pick('sales', liveS); pick('cashbook', liveC);
+
+            _pmArMsg('Reading existing archive…');
+            const exist = {};
+            for (const m of months) exist[m] = await _pmArReadMonth(m);
+
+            // Plan: writes (new/changed), stale deletions, final contents per month
+            const writes = [], stale = [], fin = {};
+            months.forEach(m => {
+                const ex = exist[m], lv = live[m];
+                const fs = Object.assign({}, ex.sales), fc = Object.assign({}, ex.cashbook);
+                [['sales', ex.sales, lv.sales, fs], ['cashbook', ex.cashbook, lv.cashbook, fc]].forEach(([kind, exK, lvK, fK]) => {
+                    Object.keys(exK).forEach(id => {
+                        const d = _pmArRecDay(kind, exK[id]);
+                        if (d && d >= from && d <= to && !(id in lvK)) { stale.push('pmArchive/' + m + '/' + kind + '/' + id); delete fK[id]; }
+                    });
+                    Object.keys(lvK).forEach(id => {
+                        if (!(id in exK) || _pmStable(exK[id]) !== _pmStable(lvK[id])) writes.push(['pmArchive/' + m + '/' + kind + '/' + id, lvK[id]]);
+                        fK[id] = lvK[id];
+                    });
+                });
+                fin[m] = { sales: fs, cashbook: fc };
+            });
+            const hadAnything = months.some(m => _pmCount(exist[m].sales) + _pmCount(exist[m].cashbook) > 0 || exist[m].meta);
+            if (!nLiveS && !nLiveC && !hadAnything) return res(true, 'empty', 'Nothing to archive between ' + from + ' and ' + to + '.', { sales: 0, cashbook: 0, removed: 0, months: [] });
+
+            // 1) new / changed records, chunked
+            _pmArMsg('Writing ' + writes.length + ' record(s)…');
+            let upd = {}, bytes = 0;
+            const flush = async () => { if (Object.keys(upd).length) { await window.dbUpdate(_pmRoot(), upd); upd = {}; bytes = 0; } };
+            for (const [p, v] of writes) {
+                const mm = p.slice(10, 17); if (touched.indexOf(mm) < 0) touched.push(mm);
+                const sz = _pmBytes(v) + p.length;
+                if (bytes + sz > PM_AR_CHUNK && Object.keys(upd).length) await flush();
+                upd[p] = v; bytes += sz;
+            }
+            await flush();
+            // 2) stale archived records inside the range
+            for (let i = 0; i < stale.length; i += 200) {
+                const u = {};
+                stale.slice(i, i + 200).forEach(p => { u[p] = null; const mm = p.slice(10, 17); if (touched.indexOf(mm) < 0) touched.push(mm); });
+                await window.dbUpdate(_pmRoot(), u);
+            }
+            // 3) meta last
+            const iso = new Date().toISOString();
+            const metaUpd = {}, expectMeta = {};
+            months.forEach(m => {
+                const nS = _pmCount(fin[m].sales), nC = _pmCount(fin[m].cashbook);
+                if (nS + nC > 0) { metaUpd['pmArchive/' + m + '/meta'] = { archivedAt: iso, sales: nS, cashbook: nC }; expectMeta[m] = { sales: nS, cashbook: nC }; }
+                else if (_pmCount(exist[m].sales) + _pmCount(exist[m].cashbook) > 0 || exist[m].meta) metaUpd['pmArchive/' + m] = null;
+            });
+            Object.keys(metaUpd).forEach(p => { const mm = p.slice(10, 17); if (touched.indexOf(mm) < 0) touched.push(mm); });
+            if (Object.keys(metaUpd).length) await window.dbUpdate(_pmRoot(), metaUpd);
+
+            // 4) read back and verify
+            _pmArMsg('Verifying…');
+            const problems = [];
+            for (const m of months) {
+                const back = await _pmArReadMonth(m);
+                ['sales', 'cashbook'].forEach(kind => {
+                    const lvK = live[m][kind], bK = back[kind];
+                    Object.keys(lvK).forEach(id => { if (!(id in bK)) problems.push(m + ' ' + kind + ' ' + id + ' missing'); else if (_pmStable(bK[id]) !== _pmStable(lvK[id])) problems.push(m + ' ' + kind + ' ' + id + ' differs'); });
+                    Object.keys(bK).forEach(id => { const d = _pmArRecDay(kind, bK[id]); if (d && d >= from && d <= to && !(id in lvK)) problems.push(m + ' ' + kind + ' ' + id + ' stale record still present'); });
+                });
+                const em = expectMeta[m];
+                if (em) { if (!back.meta || back.meta.sales !== _pmCount(back.sales) || back.meta.cashbook !== _pmCount(back.cashbook) || back.meta.archivedAt !== iso) problems.push(m + ' meta does not match the stored records'); }
+                else if (_pmCount(back.sales) + _pmCount(back.cashbook) > 0 || back.meta) problems.push(m + ' should be empty but is not');
+            }
+            if (problems.length) throw new Error('verification found ' + problems.length + ' problem(s), e.g. ' + problems[0]);
+            const msg = 'Archived ' + from + ' → ' + to + ': ' + nLiveS + ' sales, ' + nLiveC + ' cash book entries (' + Object.keys(expectMeta).length + ' month(s)); ' + stale.length + ' stale archived record(s) removed. Verified ✓' + (skipped ? ' (' + skipped + ' record(s) without a valid date were not archived.)' : '');
+            const out = res(true, 'ok', msg, { sales: nLiveS, cashbook: nLiveC, removed: stale.length, months: Object.keys(expectMeta), skipped });
+            if (document.getElementById('pm-ar-list') && document.getElementById('pm-ar-list').innerHTML) pmArRenderList();
+            return out;
+        } catch (e) {
+            console.error('[PM archive] failed', e);
+            let note = touched.length ? '' : ' Nothing in the archive was changed.';
+            if (touched.length) {
+                try {
+                    const u = {}; touched.forEach(m => { u['pmArchive/' + m + '/meta'] = null; });
+                    await window.dbUpdate(_pmRoot(), u);
+                    note = ' The affected months (' + touched.join(', ') + ') are marked INCOMPLETE — run Archive range again for the same dates.';
+                } catch (e2) { note = ' The affected months (' + touched.join(', ') + ') could NOT be marked incomplete — do not trust them; run Archive range again for the same dates.'; }
+            }
+            return res(false, 'error', 'Archive failed: ' + (e && e.message ? e.message : e) + '. Live data was not changed.' + note);
+        } finally { _pmArBusy = false; }
+    }
+    async function pmArchiveGo() {
+        if (_pmAvBlocked()) return;
+        const from = (document.getElementById('pm-ar-from') || {}).value, to = (document.getElementById('pm-ar-to') || {}).value;
+        if (!window._writeAllowed) { showCustomAlert('This copy is read-only, so archive writes are skipped. Open the official app to archive.'); _pmArMsg('Archive: read-only copy — skipped', 'warn'); return; }
+        if (!from || !to || from > to) { showCustomAlert('Pick a valid From and To date first (From must not be after To).'); return; }
+        const ok = await _pmAsk('Archive all <b>sales</b> and <b>cash book</b> records (both tracks, drafts included) dated <b>' + from + '</b> to <b>' + to + '</b>?<br><br>The archive for this date range will be <b>replaced</b> by what is live now. Archived records outside this range stay as they are. Live data is not changed or deleted.', 'Archive range', 'Archive');
+        if (!ok) return;
+        _pmSetModal('Archiving…', '<div style="font-size:13px;">Do not close this page.</div>', '');
+        const r = await pmArchiveRange(from, to, { silent: true });
+        _pmSetModal(r.ok ? 'Archive complete' : 'Archive failed', '<div style="text-align:left; font-size:13px;' + (r.ok ? '' : ' color:#C62828;') + '">' + _rpEsc(r.msg) + '</div>', _pmBtn('Close', 'closePmAlert()', 'ghost'));
+    }
+
+    // ── Archive manager (Report tab › Data card) ──
+    async function pmArRenderList() {
+        const el = document.getElementById('pm-ar-list'); if (!el) return;
+        el.innerHTML = '<div class="note">Loading…</div>';
+        try {
+            const j = await _pmShallow('pmArchive');
+            const months = (j && typeof j === 'object') ? Object.keys(j).filter(k => _pmMonthRe.test(k)).sort().reverse() : [];
+            if (!months.length) { el.innerHTML = '<div class="note">No archived months yet.</div>'; return; }
+            const metas = await Promise.all(months.map(m => window.dbGet(_pmRefAt('pmArchive/' + m + '/meta')).then(s => s.val())));
+            const btn = 'padding:7px 4px; font-size:11px; font-weight:700; border:1.5px solid var(--border); border-radius:8px; background:white; color:var(--text); flex:1;';
+            el.innerHTML = months.map((m, i) => {
+                const mt = metas[i];
+                const line = mt ? 'Sales ' + (mt.sales || 0) + ' · Cash book ' + (mt.cashbook || 0) + '<br>Archived ' + _rpEsc(_pmFmtDate(mt.archivedAt)) : '<span style="color:#C62828;">⚠ Incomplete (no meta) — run Archive range again for this month</span>';
+                return '<div style="border:1.5px solid var(--border); border-radius:10px; padding:9px; margin-bottom:8px;"><div style="font-weight:700; font-size:13px;">' + m + '</div>' +
+                    '<div class="note" style="margin:3px 0 7px;">' + line + '</div><div style="display:flex; gap:6px;">' +
+                    '<button onclick="pmArDownload(\'' + m + '\')" style="' + btn + '">⬇ Download</button>' +
+                    '<button onclick="pmArDelete(\'' + m + '\')" style="' + btn + ' border-color:#C62828; color:#C62828;">Delete from cloud</button></div></div>';
+            }).join('');
+        } catch (e) { console.error('[PM archive] list', e); el.innerHTML = '<div class="note" style="color:#C62828;">Could not read the archive list: ' + _rpEsc(e && e.message ? e.message : e) + '</div>'; }
+    }
+    async function pmArDownload(m) {
+        if (!_pmMonthRe.test(m)) return;
+        try {
+            invToast('Preparing archive file…', 6000);
+            const d = await _pmArReadMonth(m);
+            const now = new Date();
+            const counts = { sales: _pmCount(d.sales), cashbook: _pmCount(d.cashbook) };
+            if (!counts.sales && !counts.cashbook) { showCustomAlert('This month has no archived records to download.'); return; }
+            const payload = { archiveVersion: PM_AR_VERSION, app: PM_AR_APP, month: m, createdAt: now.toISOString(), archivedAt: (d.meta && d.meta.archivedAt) || null, counts, sales: d.sales, cashbook: d.cashbook };
+            const json = JSON.stringify(payload);
+            window._pmBkReady = { json, name: 'pm_archive_' + m + '_' + _pmStamp(now, true) + '.json' };
+            _pmSetModal('Archive file ready',
+                '<div style="text-align:left; font-size:13px;"><b>' + m + '</b> · ' + _pmMB(new Blob([json]).size) + '<br><span style="font-size:11px; color:var(--text2);">Sales ' + counts.sales + ' · Cash book ' + counts.cashbook + '</span></div>',
+                _pmBtn('Close', 'closePmAlert()', 'ghost') + _pmBtn('Save file', 'pmArSaveReady(\'' + m + '\')'));
+        } catch (e) { console.error(e); showCustomAlert('Could not prepare the archive file: ' + _rpEsc(e && e.message ? e.message : e)); }
+    }
+    function pmArSaveReady(m) { if (_pmMonthRe.test(m)) _pmArDownloaded[m] = true; pmBkSaveReady(); }
+    async function pmArDelete(m) {
+        if (_pmAvBlocked()) return;
+        if (!_pmMonthRe.test(m)) return;
+        if (!window._writeAllowed) { showCustomAlert('This copy is read-only, so deleting from the cloud is skipped.'); return; }
+        if (_pmArBusy || _pmBkBusy) { showCustomAlert('Another archive, backup or restore is running. Try again in a moment.'); return; }
+        let mt = null;
+        try { mt = (await window.dbGet(_pmRefAt('pmArchive/' + m + '/meta'))).val(); } catch (e) { /* counts are only informational */ }
+        const warn = _pmArDownloaded[m] ? '' : '<br><br><b style="color:#C62828;">⚠ This month has not been downloaded in this session.</b> If you have no other copy, its archived records will be lost.';
+        const ok = await _pmAsk('Delete archived month <b>' + m + '</b> from the cloud' + (mt ? ' (' + (mt.sales || 0) + ' sales, ' + (mt.cashbook || 0) + ' cash book entries)' : '') + '?<br><br>Live sales and cash book are <b>not</b> touched. Archives <b>cannot be restored into live data</b> — this app has no restore for archives.' + warn, 'Delete archived month', 'Delete');
+        if (!ok) { pmArManageOpen(); return; }
+        _pmArBusy = true;
+        try {
+            await window.dbRemove(_pmRefAt('pmArchive/' + m));
+            const left = await _pmShallow('pmArchive/' + m);
+            if (left != null) throw new Error('the month is still present in the cloud');
+            invToast('✅ Deleted archived month ' + m);
+        } catch (e) { console.error(e); showCustomAlert('Delete failed: ' + _rpEsc(e && e.message ? e.message : e)); }
+        finally { _pmArBusy = false; }
+        pmArManageOpen();
+    }
+
+    // ── "Delete before" safety check: are exactly these records archived and identical? ──
+    async function _pmArchiveCheck(kind, list) {
+        const node = kind === 'cashbook' ? 'cashbook' : 'sales';
+        try {
+            let missing = 0, changed = 0; const byMonth = {};
+            list.forEach(x => {
+                const day = _pmArRecDay(kind, x);
+                if (!day || !x || x.id == null) { missing++; return; }
+                (byMonth[day.slice(0, 7)] = byMonth[day.slice(0, 7)] || []).push(x);
+            });
+            for (const m of Object.keys(byMonth)) {
+                const obj = _pmAsObj((await window.dbGet(_pmRefAt('pmArchive/' + m + '/' + node))).val());
+                byMonth[m].forEach(x => { const a = obj[x.id]; if (a == null) missing++; else if (_pmStable(a) !== _pmStable(x)) changed++; });
+            }
+            return { ok: !missing && !changed, missing, changed, total: list.length };
+        } catch (e) {
+            console.error('[PM archive] check failed', e);
+            return { ok: false, unverified: true, error: (e && e.message) || String(e), missing: 0, changed: 0, total: list.length };
+        }
+    }
+    function _pmArch3(chk, kind) {
+        return new Promise(res => {
+            window._pmArch3Res = res;
+            const what = kind === 'cashbook' ? 'cash book entries' : 'invoices';
+            const msg = chk.unverified
+                ? 'The archive could not be checked (' + _rpEsc(chk.error) + '). These <b>' + chk.total + '</b> ' + what + ' are <b>not verified</b> as archived.'
+                : '<b>' + (chk.missing + chk.changed) + '</b> of <b>' + chk.total + '</b> ' + what + ' are not safely archived: <b>' + chk.missing + '</b> missing from the archive, <b>' + chk.changed + '</b> different from the archived copy.';
+            _pmSetModal('Not fully archived', '<div style="text-align:left; font-size:13px;">' + msg + '<br><br>You can archive them first, or delete anyway.</div>',
+                '<div style="display:flex; flex-direction:column; gap:8px; width:100%;">' + _pmBtn('Cancel', '_pmArch3Done(\'cancel\')', 'ghost') + _pmBtn('Archive first, then delete', '_pmArch3Done(\'archive\')') + _pmBtn('Delete anyway', '_pmArch3Done(\'delete\')', 'danger') + '</div>');
+        });
+    }
+    function _pmArch3Done(v) { closePmAlert(); const r = window._pmArch3Res; window._pmArch3Res = null; if (r) r(v); }
+    // Returns true when deleting may continue.
+    async function _pmDelArchiveGate(kind, list, cut) {
+        invToast('Checking the archive…', 6000);
+        let chk = await _pmArchiveCheck(kind, list);
+        if (chk.ok) return true;
+        const choice = await _pmArch3(chk, kind);
+        if (choice === 'delete') return true;
+        if (choice !== 'archive') return false;
+        const days = list.map(x => _pmArRecDay(kind, x)).filter(Boolean).sort();
+        const from = days[0] || cut;
+        const to = _rpDate(new Date(new Date(cut + 'T12:00:00').getTime() - 86400000));
+        _pmSetModal('Archiving…', '<div style="font-size:13px;">Archiving ' + from + ' → ' + to + ' before deleting. Do not close this page.</div>', '');
+        const r = await pmArchiveRange(from, to, { silent: true });
+        if (!r.ok) { _pmSetModal('Nothing was deleted', '<div style="text-align:left; font-size:13px; color:#C62828;">' + _rpEsc(r.msg) + '</div>', _pmBtn('Close', 'closePmAlert()', 'ghost')); return false; }
+        chk = await _pmArchiveCheck(kind, list);
+        if (!chk.ok) { _pmSetModal('Nothing was deleted', '<div style="text-align:left; font-size:13px; color:#C62828;">The archive was written, but these records still do not match it' + (chk.unverified ? ' (could not check: ' + _rpEsc(chk.error) + ')' : ' (' + chk.missing + ' missing, ' + chk.changed + ' different)') + '. Delete was cancelled.</div>', _pmBtn('Close', 'closePmAlert()', 'ghost')); return false; }
+        closePmAlert();
+        return true;
+    }
+    function _pmDelSalesWarn(kind, cut) {
+        if (kind !== 'sales') return '';
+        const c = new Date(cut + 'T00:00:00'), hit = [];
+        ['A', 'B'].forEach(t => { const s = getSalesHedgeStartDate(t); if (s && c > s) hit.push('Track ' + t + ' (' + _rpDate(s) + ')'); });
+        if (!hit.length) return '';
+        return '<br><br><b style="color:#E65100;">⚠ Warning:</b> this cut-off is after the “Count sales since” date for ' + hit.join(' and ') + '. Deleting those invoices will change the grams and rate figures shown in the Purchase tab.';
+    }
+
+    // ── Viewer: accessors used ONLY by the report screens (live arrays are never overwritten) ──
+    function _pmAvMerged() {
+        const c = _pmAvCache;
+        if (c && c.s === invoiceHistory && c.c === cashbook && c.v === _pmAv.ver) return c;
+        const ms = new Map(), mc = new Map();
+        const put = (map, src) => { Object.keys(src || {}).forEach(k => map.set(k, src[k])); };
+        _pmAv.files.forEach(f => { put(ms, f.sales); put(mc, f.cashbook); });                                   // lowest priority
+        Object.keys(_pmAv.cloud).sort().forEach(m => { put(ms, _pmAv.cloud[m].sales); put(mc, _pmAv.cloud[m].cashbook); });
+        // Live wins over archive: same id replaces the archived copy. Live records with no id are matched by content,
+        // so a record that is both live and archived is never counted twice.
+        const putLive = (map, arr) => {
+            const noId = [];
+            arr.forEach((r, i) => { if (r && r.id != null) map.set(String(r.id), r); else noId.push(r); });
+            if (noId.length) {
+                const sig = new Set(noId.map(_pmStable));
+                Array.from(map.keys()).forEach(k => { if (sig.has(_pmStable(map.get(k)))) map.delete(k); });
+                noId.forEach((r, i) => map.set('__live' + i, r));
+            }
+        };
+        putLive(ms, invoiceHistory); putLive(mc, cashbook);
+        _pmAvCache = { s: invoiceHistory, c: cashbook, v: _pmAv.ver, sales: Array.from(ms.values()), cash: Array.from(mc.values()) };
+        return _pmAvCache;
+    }
+    function _pmSalesSrc() { return _pmAv.active ? _pmAvMerged().sales : invoiceHistory; }
+    function _pmCashSrc() { return _pmAv.active ? _pmAvMerged().cash : cashbook; }
+
+    function _pmAvApplyUi() {
+        const on = _pmAv.active, g = id => document.getElementById(id);
+        const full = g('pm-av-full'), body = g('pm-av-body'), content = g('pm-content');
+        const sales = g('pm-pane-sales'), report = g('pm-pane-report'), purchase = g('pm-pane-purchase');
+        if (!full || !body || !content || !sales || !report || !purchase) return;
+        if (on) {
+            // Move the existing Sales / Report panes into the full-screen window (they keep rendering exactly as before)
+            if (sales.parentNode !== body) { body.appendChild(sales); body.appendChild(report); }
+            full.style.display = 'flex';
+        } else {
+            if (sales.parentNode !== content) { content.insertBefore(report, purchase); content.insertBefore(sales, report); }
+            full.style.display = 'none';
+        }
+    }
+    function pmAvTab(name) {
+        if (name !== 'report') name = 'sales';
+        pmSwitchTab(name);
+        ['sales', 'report'].forEach(n => {
+            const el = document.getElementById('pm-av-tab-' + n); if (!el) return;
+            el.style.color = n === name ? '#E65100' : 'var(--text2)';
+            el.style.borderBottomColor = n === name ? '#E65100' : 'transparent';
+        });
+        const b = document.getElementById('pm-av-body'); if (b) b.scrollTop = 0;
+    }
+    function _pmAvRenderBanner() {
+        const el = document.getElementById('pm-av-banner'); if (!el) return;
+        if (!_pmAv.active) { el.innerHTML = ''; return; }
+        const months = Object.keys(_pmAv.cloud).sort(), nm = months.length;
+        const bs = 'padding:7px 11px; font-size:12px; font-weight:700; border:1.5px solid #E65100; border-radius:8px; background:white; color:#E65100; margin:0;';
+        const chipCss = 'display:inline-flex; align-items:center; gap:6px; background:white; border:1px solid #E65100; border-radius:14px; padding:2px 4px 2px 9px; font-size:11px; margin:6px 6px 0 0;';
+        const xBtn = 'border:none; background:#E65100; color:white; border-radius:50%; width:18px; height:18px; font-size:11px; line-height:18px; padding:0; margin:0;';
+        const cloudChip = (_pmAv.from && _pmAv.to) ? '<span style="' + chipCss + '">📅 ' + _rpEsc(_pmAv.from + ' → ' + _pmAv.to) + ' · live + ' + (nm ? nm + ' archived month' + (nm > 1 ? 's' : '') : 'no archived months') +
+            ' <button onclick="pmAvClearCloud()" style="' + xBtn + '">✕</button></span>' : '';
+        const chips = _pmAv.files.map(f => '<span style="' + chipCss + '">📄 ' + _rpEsc(f.name) + ' · ' + _rpEsc(f.month) +
+            ' <button onclick="pmAvCloseFile(' + f.id + ')" style="' + xBtn + '">✕</button></span>').join('');
+        el.innerHTML = '<div style="background:#FFF3E0; border-bottom:2px solid #E65100; padding:10px 14px;"><div style="max-width:720px; margin:0 auto;">' +
+            '<div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;"><b style="font-size:13px; color:#E65100; flex:1; min-width:150px;">🗄 ARCHIVE VIEWER <span style="font-weight:600;">— read-only</span></b>' +
+            '<button onclick="pmAvPickFiles()" style="' + bs + '">＋ Add local file</button>' +
+            '<button onclick="pmAvOpen()" style="' + bs + '">☁ Cloud range</button>' +
+            '<button onclick="pmAvExit()" style="' + bs + ' background:#E65100; color:white;">Close</button></div>' +
+            '<div class="note" style="margin-top:6px;">Showing live data plus archived data (no double counting — if a record is in both, the live one is used). Nothing here changes your records.</div>' +
+            ((cloudChip || chips) ? '<div>' + cloudChip + chips + '</div>' : '') + '</div></div>';
+    }
+    function _pmAvRefresh() { _pmAv.ver++; _pmAvCache = null; _pmAvRenderBanner(); _pmRerenderActiveTab(); }
+    function _pmAvActivate() {
+        const first = !_pmAv.active;
+        if (first) _pmAv.prevTab = _pmActiveTab;
+        _pmAv.active = true; _pmAv.ver++; _pmAvCache = null;
+        _pmAvApplyUi(); _pmAvRenderBanner();
+        pmAvTab(first ? 'sales' : (_pmActiveTab === 'report' ? 'report' : 'sales'));
+    }
+    function pmAvExit() {
+        const prev = _pmAv.prevTab || 'purchase';
+        _pmAv.active = false; _pmAv.cloud = {}; _pmAv.files = []; _pmAv.from = ''; _pmAv.to = ''; _pmAv.ver++; _pmAvCache = null;
+        _pmAvApplyUi(); _pmAvRenderBanner();
+        pmSwitchTab(prev);
+        _pmApplyTrackUi();
+        invToast('Archive viewer closed');
+    }
+    function _pmAvSetDates(from, to) {
+        const g = id => document.getElementById(id);
+        if (g('inv-rep-from')) g('inv-rep-from').value = from;
+        if (g('inv-rep-to')) g('inv-rep-to').value = to;
+        if (g('rp-from')) g('rp-from').value = from;
+        if (g('rp-to')) g('rp-to').value = to;
+        _rpRange.from = from; _rpRange.to = to;
+    }
+    function pmAvClearCloud() { _pmAv.cloud = {}; _pmAv.from = ''; _pmAv.to = ''; _pmAvRefresh(); }
+    function pmAvCloseFile(id) { _pmAv.files = _pmAv.files.filter(f => f.id !== id); _pmAvRefresh(); }
+
+    function pmAvOpen() {
+        const today = _rpDate(new Date());
+        const from = _pmAv.from || today.slice(0, 8) + '01', to = _pmAv.to || today;
+        const sec = 'font-size:11px; font-weight:700; letter-spacing:.06em; color:var(--text2); text-transform:uppercase; margin:0 0 6px;';
+        _pmSetModal('Archive viewer',
+            '<div style="text-align:left; font-size:13px;">' +
+            '<div style="' + sec + '">📅 Pick a date range — live + archived data</div>' +
+            '<div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:8px;">' +
+            '<div><label style="font-size:11px; display:block; margin-bottom:3px;">From</label><input type="date" id="pm-av-from" value="' + from + '" style="margin:0; width:100%;"></div>' +
+            '<div><label style="font-size:11px; display:block; margin-bottom:3px;">To</label><input type="date" id="pm-av-to" value="' + to + '" style="margin:0; width:100%;"></div></div>' +
+            '<div class="note" style="margin-bottom:6px;">Shows everything in this range: live data, plus anything archived in the cloud. Records that are in both are shown once.</div><div style="font-size:11px; font-weight:700; margin-bottom:4px;">Archived months available</div><div id="pm-av-months" class="note">Loading…</div>' +
+            '<div id="pm-av-msg" class="note" style="margin:6px 0 10px; min-height:14px; color:#C62828;"></div>' +
+            '<div style="border-top:1px solid #eee; padding-top:10px;"><div style="' + sec + '">📄 Local archive file</div>' +
+            '<div class="note">Open one or more archive files (.json) saved on this device.</div></div></div>',
+            '<div style="display:flex; flex-direction:column; gap:8px; width:100%;">' + _pmBtn('📅 View this date range', 'pmAvLoad()') + _pmBtn('📄 Open local file(s)', 'pmAvPickFiles()') + _pmBtn('Cancel', 'closePmAlert()', 'ghost') + '</div>');
+        _pmAvFillMonths();
+    }
+    async function _pmAvFillMonths() {
+        try {
+            const j = await _pmShallow('pmArchive');
+            const el = document.getElementById('pm-av-months'); if (!el) return;
+            const months = (j && typeof j === 'object') ? Object.keys(j).filter(k => _pmMonthRe.test(k)).sort().reverse() : [];
+            if (!months.length) { el.textContent = 'No archived months in the cloud yet — live data will still be shown.'; return; }
+            const metas = await Promise.all(months.map(m => window.dbGet(_pmRefAt('pmArchive/' + m + '/meta')).then(s => s.val())));
+            const el2 = document.getElementById('pm-av-months'); if (!el2) return;
+            el2.innerHTML = months.map((m, i) => '<div style="display:flex; justify-content:space-between; font-size:12px; padding:3px 0; border-top:1px solid #eee;"><b>' + m + '</b><span>' + (metas[i] ? 'Sales ' + (metas[i].sales || 0) + ' · Cash ' + (metas[i].cashbook || 0) : '⚠ incomplete') + '</span></div>').join('');
+        } catch (e) { const el = document.getElementById('pm-av-months'); if (el) { el.textContent = 'Could not list archived months: ' + (e && e.message ? e.message : e); el.style.color = '#C62828'; } }
+    }
+    async function pmAvLoad() {
+        const from = (document.getElementById('pm-av-from') || {}).value, to = (document.getElementById('pm-av-to') || {}).value;
+        const msg = t => { const el = document.getElementById('pm-av-msg'); if (el) el.textContent = t; };
+        if (!from || !to || from > to) { msg('Pick a valid From and To date.'); return; }
+        try {
+            msg('Loading…');
+            const j = await _pmShallow('pmArchive');
+            const have = (j && typeof j === 'object') ? Object.keys(j).filter(k => _pmMonthRe.test(k)) : [];
+            const want = _pmMonthsBetween(from, to).filter(m => have.indexOf(m) >= 0);
+            const cloud = {};
+            for (const m of want) { const d = await _pmArReadMonth(m); cloud[m] = { sales: d.sales, cashbook: d.cashbook, meta: d.meta }; }
+            _pmAv.cloud = cloud; _pmAv.from = from; _pmAv.to = to;
+            _pmAvSetDates(from, to);
+            closePmAlert();
+            _pmAvActivate();
+            invToast(want.length ? 'Viewing ' + from + ' → ' + to + ' (live + ' + want.length + ' archived month(s))' : 'Viewing ' + from + ' → ' + to + ' (live data — nothing archived yet)');
+        } catch (e) { console.error('[PM viewer] load', e); msg('Could not load the archive: ' + (e && e.message ? e.message : e)); }
+    }
+    function pmAvPickFiles() { closePmAlert(); const i = document.getElementById('pm-av-file'); if (i) { i.value = ''; i.click(); } }
+    function _pmAvValidateFile(o) {
+        const err = [];
+        if (!o || typeof o !== 'object' || Array.isArray(o)) return { ok: false, errors: ['not an archive file'] };
+        if (o.backupVersion !== undefined) err.push('this is a backup file, not an archive file');
+        if (o.archiveVersion !== PM_AR_VERSION) err.push('missing or wrong archiveVersion');
+        if (o.app !== PM_AR_APP) err.push('not a Suhag Purchase Manager archive');
+        if (typeof o.month !== 'string' || !_pmMonthRe.test(o.month)) err.push('month is missing or not YYYY-MM');
+        if (!o.counts || typeof o.counts.sales !== 'number' || typeof o.counts.cashbook !== 'number') err.push('counts are missing');
+        ['sales', 'cashbook'].forEach(k => {
+            const v = o[k];
+            if (v == null) return;
+            if (typeof v !== 'object' || Array.isArray(v)) err.push(k + ' has the wrong shape');
+            else if (Object.keys(v).some(id => !v[id] || typeof v[id] !== 'object' || Array.isArray(v[id]))) err.push(k + ' contains an invalid record');
+        });
+        if (!err.length) ['sales', 'cashbook'].forEach(k => { if (_pmCount(o[k]) !== o.counts[k]) err.push(k + ' has ' + _pmCount(o[k]) + ' records but the file says ' + o.counts[k]); });
+        if (err.length) return { ok: false, errors: err };
+        return { ok: true, month: o.month, sales: o.sales || {}, cashbook: o.cashbook || {}, counts: o.counts };
+    }
+    function pmAvFilesChosen(inp) {
+        const files = Array.from(inp.files || []); if (!files.length) return;
+        Promise.all(files.map(f => new Promise(res => {
+            const rd = new FileReader();
+            rd.onload = () => res({ name: f.name, text: rd.result });
+            rd.onerror = () => res({ name: f.name, error: 'could not be read' });
+            rd.readAsText(f);
+        }))).then(list => {
+            const errs = []; let added = 0;
+            list.forEach(it => {
+                if (it.error) { errs.push(it.name + ': ' + it.error); return; }
+                let o; try { o = JSON.parse(it.text); } catch (e) { errs.push(it.name + ': not valid JSON'); return; }
+                const v = _pmAvValidateFile(o);
+                if (!v.ok) { errs.push(it.name + ': ' + v.errors.join('; ')); return; }
+                _pmAv.files.push({ id: _pmAv.nextId++, name: it.name, month: v.month, sales: v.sales, cashbook: v.cashbook, counts: v.counts });
+                added++;
+            });
+            inp.value = '';
+            if (added) {
+                if (!_pmAv.from) {
+                    const ms = _pmAv.files.map(f => f.month).sort(), last = ms[ms.length - 1];
+                    _pmAvSetDates(ms[0] + '-01', _rpDate(new Date(+last.slice(0, 4), +last.slice(5, 7), 0)));
+                }
+                _pmAvActivate();
+            }
+            if (errs.length) showCustomAlert('<div style="text-align:left; font-size:13px; color:#C62828;">' + errs.map(e => '• ' + _rpEsc(e)).join('<br>') + '</div>', added ? 'Some files were rejected' : 'Cannot open file');
+        });
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // "MORE" MENU (Track B only) — each option opens its own popup
+    // ═══════════════════════════════════════════════════════════════════
+    function pmMoreToggle() {
+        const m = document.getElementById('pm-more-menu');
+        if (m && m.style.display === 'block') pmMoreClose(); else pmMoreOpen();
+    }
+    function pmMoreOpen() {
+        if (currentInvTrack !== 'B') return;
+        const b = document.getElementById('pm-more-btn'), m = document.getElementById('pm-more-menu'), bd = document.getElementById('pm-more-backdrop');
+        if (!b || !m || !bd) return;
+        const r = b.getBoundingClientRect();
+        m.style.top = (r.bottom + 6) + 'px';
+        m.style.display = 'block'; bd.style.display = 'block';
+    }
+    function pmMoreClose() {
+        const m = document.getElementById('pm-more-menu'), bd = document.getElementById('pm-more-backdrop');
+        if (m) m.style.display = 'none'; if (bd) bd.style.display = 'none';
+    }
+    function pmMoreGo(fn) { pmMoreClose(); if (currentInvTrack !== 'B') return; fn(); }
+
+    const _pmPopWrap = inner => '<div style="display:flex; flex-direction:column; gap:8px; width:100%;">' + inner + '</div>';
+
+    // Backup & restore
+    function pmBackupMenuOpen() {
+        _pmSetModal('Backup & restore',
+            '<div style="text-align:left; font-size:13px;"><div id="pm-bk-last" class="note" style="margin-bottom:2px;">Last cloud backup: checking…</div>' +
+            '<div id="pm-bk-msg" class="note" style="min-height:14px;"></div>' +
+            '<p class="note" style="margin:8px 0 0;">Covers suppliers, purchases, payments, piece supplies, owed log, cash book and the sales copy. The POS is never touched.</p></div>',
+            _pmPopWrap(_pmBtn('☁ Back up now', 'pmBkManual()') + _pmBtn('⬇ Download backup file', 'pmBkDownloadFile()') + _pmBtn('↩ Restore…', 'pmRestoreOpen()', 'danger') + _pmBtn('Close', 'closePmAlert()', 'ghost')));
+        pmBkRefreshStatus();
+    }
+
+    // Archive data (copy a date range into the cloud archive)
+    function pmArchiveMenuOpen() {
+        _pmSetModal('Archive data',
+            '<div style="text-align:left; font-size:13px;"><p class="note" style="margin:0 0 10px;">Copies sales and cash book records for a date range into a separate cloud archive for analytics. Live data is never deleted by this. Purchases, suppliers and payments are not archived.</p>' +
+            '<div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:8px;">' +
+            '<div><label style="font-size:11px; display:block; margin-bottom:3px;">From</label><input type="date" id="pm-ar-from" style="margin:0; width:100%;"></div>' +
+            '<div><label style="font-size:11px; display:block; margin-bottom:3px;">To</label><input type="date" id="pm-ar-to" style="margin:0; width:100%;"></div></div>' +
+            '<div id="pm-ar-msg" class="note" style="min-height:14px;"></div></div>',
+            _pmPopWrap(_pmBtn('🗄 Archive range', 'pmArchiveGo()') + _pmBtn('Manage archived months', 'pmArManageOpen()', 'ghost') + _pmBtn('Close', 'closePmAlert()', 'ghost')));
+    }
+    function pmArManageOpen() {
+        _pmSetModal('Archived months', '<div id="pm-ar-list" style="text-align:left;"></div>', _pmPopWrap(_pmBtn('Back', 'pmArchiveMenuOpen()', 'ghost') + _pmBtn('Close', 'closePmAlert()', 'ghost')));
+        pmArRenderList();
+    }
+
+    // Export CSV
+    function pmExportMenuOpen() {
+        const f = _rpRange.from || _rpDate(new Date()), t = _rpRange.to || _rpDate(new Date());
+        _pmSetModal('Export CSV',
+            '<div style="text-align:left; font-size:13px;"><p class="note" style="margin:0 0 10px;">Cash book entries for the dates below (Track B).</p>' +
+            '<div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:8px;">' +
+            '<div><label style="font-size:11px; display:block; margin-bottom:3px;">From</label><input type="date" id="pm-ex-from" value="' + f + '" style="margin:0; width:100%;"></div>' +
+            '<div><label style="font-size:11px; display:block; margin-bottom:3px;">To</label><input type="date" id="pm-ex-to" value="' + t + '" style="margin:0; width:100%;"></div></div>' +
+            '<div id="pm-ex-msg" class="note" style="min-height:14px; color:#C62828;"></div></div>',
+            _pmPopWrap(_pmBtn('⬇ Download CSV', 'pmExportGo()') + _pmBtn('Close', 'closePmAlert()', 'ghost')));
+    }
+    function pmExportGo() {
+        const f = (document.getElementById('pm-ex-from') || {}).value, t = (document.getElementById('pm-ex-to') || {}).value;
+        const msg = document.getElementById('pm-ex-msg');
+        if (!f || !t || f > t) { if (msg) msg.textContent = 'Pick a valid From and To date (From must not be after To).'; return; }
+        if (!_rpEntries(f, t).length) { if (msg) msg.textContent = 'Nothing to export in this range.'; return; }
+        if (msg) msg.textContent = '';
+        rpExportCsv(f, t);
+    }
+
+    // Delete old data
+    function pmDeleteMenuOpen() {
+        _pmSetModal('Delete old data',
+            '<div style="text-align:left; font-size:13px;"><label style="font-size:11px; display:block; margin-bottom:3px;">Delete everything before</label>' +
+            '<input type="date" id="rp-del-date" style="margin:0 0 8px; width:100%;">' +
+            '<div id="pm-del-msg" class="note" style="min-height:14px; color:#C62828; margin-bottom:6px;"></div>' +
+            '<p class="note" style="margin:0;">A backup file downloads first. This only affects the Purchase Manager — the POS is never touched, and clearing the POS never affects this data.</p></div>',
+            _pmPopWrap('<div style="display:flex; gap:8px;">' + _pmBtn('Delete cash book', "pmDeleteGo('cashbook')", 'danger') + _pmBtn('Delete sales', "pmDeleteGo('sales')", 'danger') + '</div>' + _pmBtn('Close', 'closePmAlert()', 'ghost')));
+    }
+    function pmDeleteGo(kind) {
+        const d = (document.getElementById('rp-del-date') || {}).value;
+        if (!d) { const m = document.getElementById('pm-del-msg'); if (m) m.textContent = 'Pick the cut-off date first. Everything BEFORE it will be deleted.'; return; }
+        rpDeleteBefore(kind);
     }
 
     // ── Boot ──
