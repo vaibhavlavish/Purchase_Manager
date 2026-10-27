@@ -1738,12 +1738,23 @@ function computeCombinedAvgRate(metal){
         const el = document.getElementById('piece-supplies-card'); if (!el) return;
         if (currentInvTrack !== 'B') { el.innerHTML = ''; return; }
         const recs = pieceSupplies.filter(r => r.track === 'B');
+        // ＋ names under Supplier in the POS ledger are one-off names (no Purchase Manager supplier), so they have
+        // no pieceSupplies records — rebuild their bill / payment rows from the POS cash book copy instead.
+        cashbook.forEach(e => {
+            const x = e && e.supplier;
+            if (!x || !x.adhoc || x.kind !== 'piece' || e.track !== 'B') return;
+            const nm = String(x.partyName || e.accountName || '').trim();
+            const pid = 'adhoc:' + nm.toLowerCase();
+            const base = { partyId: pid, adhocName: nm, track: 'B', source: 'pos', desc: x.desc || '', qty: x.qty || 0, date: e.date, createdAt: e.ts || ((e.date || '') + 'T12:00:00.000Z') };
+            if ((x.billAmount || 0) > 0) recs.push(Object.assign({}, base, { id: e.id + ':bill', kind: 'bill', amount: x.billAmount }));
+            recs.push(Object.assign({}, base, { id: e.id + ':pay', kind: 'payment', amount: e.amount || 0 }));
+        });
         const byParty = {};
         recs.forEach(r => { (byParty[r.partyId] = byParty[r.partyId] || []).push(r); });
         const rows = Object.keys(byParty).map(pid => {
             const list = byParty[pid].slice().sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
             const bal = list.reduce((s, r) => s + (r.kind === 'payment' ? -(r.amount || 0) : (r.amount || 0)), 0);
-            return { pid, list, bal };
+            return { pid, list, bal, name: (list.find(x => x.adhocName) || {}).adhocName || getPartyName(pid) };
         }).sort((a, b) => b.bal - a.bal);
         let html = `<div style="${_cardCss}">
             <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:10px;">
@@ -1754,7 +1765,7 @@ function computeCombinedAvgRate(metal){
         rows.forEach(r => {
             const open = !!_pieceOpen[r.pid];
             html += `<div onclick="_pieceToggle('${_rpEnc(r.pid)}')" style="display:flex; justify-content:space-between; align-items:center; padding:9px 0; border-top:1px solid var(--border); cursor:pointer; user-select:none;">
-                <div style="font-size:13px; font-weight:700;"><span style="font-size:11px; color:var(--text2); margin-right:6px;">${open ? '▾' : '▸'}</span>${_rpEsc(getPartyName(r.pid))}</div>
+                <div style="font-size:13px; font-weight:700;"><span style="font-size:11px; color:var(--text2); margin-right:6px;">${open ? '▾' : '▸'}</span>${_rpEsc(r.name)}</div>
                 <div style="font-size:13px; font-weight:800; color:${r.bal > 0.5 ? '#C62828' : '#2E7D32'};">${r.bal > 0.5 ? _rpFmt(r.bal) + ' due' : 'Settled'}</div>
             </div>`;
             if (open) {
