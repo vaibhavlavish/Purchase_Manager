@@ -183,6 +183,7 @@
             box-shadow: 0 -8px 32px rgba(0,0,0,0.15);
             max-height: 88vh; overflow-y: auto;
         }
+        #pm-alert-modal { z-index: 1170; }
         button { cursor: pointer; }
         /* ── Purchase Manager UI refresh ── */
         html, body { background: #1a1a1a !important; overscroll-behavior: none; }
@@ -372,6 +373,7 @@
         <label style="font-size:12px; font-weight:700; color:#888; margin:0 0 4px 0;">PARTY</label>
         <div style="display:flex; gap:8px; margin-bottom:14px;">
             <select id="purchase-party" onchange="onPurchasePartyChange()" style="flex:1; padding:10px 12px; border:1.5px solid #e0e0e0; border-radius:10px; font-size:14px; box-sizing:border-box; margin:0;"></select>
+            <button onclick="editSelectedParty('purchase-party')" title="Edit this party" style="background:none; border:1.5px solid #e0e0e0; color:#555; font-size:16px; width:44px; flex-shrink:0; border-radius:10px; padding:0; margin:0; box-shadow:none;">✎</button>
             <button onclick="deleteSelectedParty('purchase-party')" title="Delete this party" style="background:none; border:1.5px solid #e0e0e0; color:#C62828; font-size:16px; width:44px; flex-shrink:0; border-radius:10px; padding:0; margin:0;">🗑️</button>
         </div>
 
@@ -440,6 +442,21 @@
     </div>
 </div>
 
+<div id="party-edit-modal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.55); z-index:1160; align-items:flex-end; justify-content:center;">
+    <div style="background:white; border-radius:20px 20px 0 0; width:100%; max-width:480px; padding:22px 20px 30px; box-sizing:border-box;">
+        <h3 id="pe-title" style="margin:0 0 14px; font-size:18px; color:#1a1a1a;">Supplier</h3>
+        <label style="font-size:12px; font-weight:700; color:#888; margin:0 0 4px 0;">NAME</label>
+        <input type="text" id="pe-name" maxlength="40" style="padding:10px 12px; border:1.5px solid #e0e0e0; border-radius:10px; width:100%; font-size:14px; margin-bottom:14px; box-sizing:border-box;">
+        <label style="font-size:12px; font-weight:700; color:#888; margin:0 0 4px 0;">SUPPLIES</label>
+        <div id="pe-types" style="display:flex; gap:8px; margin-bottom:6px;"></div>
+        <p class="note" style="margin:0 0 10px;">Gold or Silver limits this supplier to that metal. 1G = 1-gram ornaments, bought by the piece. Shared live with the POS.</p>
+        <div id="pe-err" style="font-size:12px; font-weight:700; color:#C62828; min-height:16px; margin-bottom:8px;"></div>
+        <div style="display:flex; gap:8px;">
+            <button onclick="_peFinish(null)" style="flex:1; padding:13px; background:#eee; color:#333; border:none; border-radius:12px; font-weight:700; box-shadow:none;">Cancel</button>
+            <button onclick="savePartyEdit()" style="flex:2; padding:13px; background:var(--gold); color:white; border:none; border-radius:12px; font-size:15px; font-weight:800;">✓ Save</button>
+        </div>
+    </div>
+</div>
 <div id="piece-bill-modal">
     <div id="piece-bill-panel">
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
@@ -474,6 +491,7 @@
         <label style="font-size:12px; font-weight:700; color:#888; margin:0 0 4px 0;">PARTY</label>
         <div style="display:flex; gap:8px; margin-bottom:14px;">
             <select id="payment-party" onchange="onPaymentPartyChange()" style="flex:1; padding:10px 12px; border:1.5px solid #e0e0e0; border-radius:10px; font-size:14px; box-sizing:border-box; margin:0;"></select>
+            <button onclick="editSelectedParty('payment-party')" title="Edit this party" style="background:none; border:1.5px solid #e0e0e0; color:#555; font-size:16px; width:44px; flex-shrink:0; border-radius:10px; padding:0; margin:0; box-shadow:none;">✎</button>
             <button onclick="deleteSelectedParty('payment-party')" title="Delete this party" style="background:none; border:1.5px solid #e0e0e0; color:#C62828; font-size:16px; width:44px; flex-shrink:0; border-radius:10px; padding:0; margin:0;">🗑️</button>
         </div>
 
@@ -612,6 +630,16 @@
         else if (_pmActiveTab === 'report') renderReportTab();
         else renderPurchaseTab();
     }
+    // Firebase listeners can fire several times in a burst. Redraw at most once per 500 ms:
+    // the first change draws straight away, anything arriving inside the window is folded into one
+    // final redraw. User actions (switching tab/track, restore) still redraw immediately.
+    let _pmRedrawLast = 0, _pmRedrawTimer = null;
+    function _pmRerenderSoon(){
+        if (_pmRedrawTimer) return;                       // a final redraw is already queued
+        const wait = 500 - (Date.now() - _pmRedrawLast);
+        if (wait <= 0) { _pmRedrawLast = Date.now(); _pmRerenderActiveTab(); return; }
+        _pmRedrawTimer = setTimeout(() => { _pmRedrawTimer = null; _pmRedrawLast = Date.now(); _pmRerenderActiveTab(); }, wait);
+    }
     function _pmApplyTrackUi(){
         const rt = document.getElementById('pm-tab-report');
         if (rt) rt.style.display = currentInvTrack === 'B' ? 'flex' : 'none';   // Report: Track B only
@@ -668,12 +696,12 @@
             rates = val.rates || { gold: {}, silver: {} };
             baseCalcDefaults = val.baseCalcDefaults || {};
             taxRateCfg = (typeof val.taxRate === 'number') ? val.taxRate : 3;
-            _pmRerenderActiveTab();
+            _pmRerenderSoon();
         }, err => console.error('[Config] read error', err));
 
         window.dbOnValue(window.dbRef(window.firebaseDB, 'jewelryData/products'), snap => {
             productData = snap.val() || {};
-            _pmRerenderActiveTab();
+            _pmRerenderSoon();
         }, err => console.error('[Products] read error', err));
 
         // The Purchase Manager keeps its OWN copy of invoices (pmSales), written by
@@ -682,57 +710,58 @@
             invoiceHistory = _objToArraySimple(snap.val());
             _pmLoaded.pmSales = true;
             pmMaybeImportSales();
-            _pmRerenderActiveTab();
+            _pmRerenderSoon();
         }, err => console.error('[PmSales] read error', err));
 
         window.dbOnValue(window.dbRef(window.firebaseDB, 'cashbook'), snap => {
             cashbook = _objToArraySimple(snap.val());
             _pmLoaded.cashbook = true;
-            _pmRerenderActiveTab();
+            _pmRerenderSoon();
         }, err => console.error('[Cashbook] read error', err));
 
         window.dbOnValue(window.dbRef(window.firebaseDB, 'pieceSupplies'), snap => {
             pieceSupplies = _objToArraySimple(snap.val());
             _pmLoaded.pieceSupplies = true;
-            _pmRerenderActiveTab();
+            _pmRerenderSoon();
         }, err => console.error('[PieceSupplies] read error', err));
 
         window.dbOnValue(window.dbRef(window.firebaseDB, 'installments'), snap => {
             installmentPlans = _objToArraySimple(snap.val());
-            _pmRerenderActiveTab();
+            _pmRerenderSoon();
         }, err => console.error('[Installments] read error', err));
 
         window.dbOnValue(window.dbRef(window.firebaseDB, 'parties'), snap => {
             const val = snap.val() || {};
             parties = Object.values(val).sort((a, b) => (a.name || '').localeCompare(b.name || ''));
             _pmLoaded.parties = true;
-            _pmRerenderActiveTab();
+            _pmRerenderSoon();
         }, err => console.error('[Parties] read error', err));
 
         window.dbOnValue(window.dbRef(window.firebaseDB, 'purchases'), snap => {
             const val = snap.val() || {};
             purchases = Object.values(val).sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
             _pmLoaded.purchases = true;
-            _pmRerenderActiveTab();
+            _pmRerenderSoon();
         }, err => console.error('[Purchases] read error', err));
 
         window.dbOnValue(window.dbRef(window.firebaseDB, 'payments'), snap => {
             const val = snap.val() || {};
             payments = Object.values(val).sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
             _pmLoaded.payments = true;
-            _pmRerenderActiveTab();
+            _pmRerenderSoon();
         }, err => console.error('[Payments] read error', err));
     }
 
-    async function addParty(name){
+    async function addParty(name, metalType){
         name = (name || '').trim();
         if (!name) return null;
         const existing = parties.find(p => p.name.toLowerCase() === name.toLowerCase());
         if (existing) return existing.id;
         const id = crypto.randomUUID();
         try {
-            await window.dbUpdate(window.dbRef(window.firebaseDB, 'parties'), { [id]: { id, name } });
-            parties.push({ id, name });
+            const rec = metalType ? { id, name, metalType } : { id, name };
+            await window.dbUpdate(window.dbRef(window.firebaseDB, 'parties'), { [id]: rec });
+            parties.push(rec);
             parties.sort((a, b) => a.name.localeCompare(b.name));
             return id;
         } catch (e) {
@@ -820,7 +849,7 @@
         window.dbOnValue(window.dbRef(window.firebaseDB, 'hedgeSalesStartDates'), snap => {
             const val = snap.val() || {};
             salesHedgeStartDates = { A: val.A || null, B: val.B || null };
-            _pmRerenderActiveTab();
+            _pmRerenderSoon();
         }, err => console.error('[SalesHedgeDates] read error', err));
     }
     function getSalesHedgeStartDate(track){
@@ -867,7 +896,7 @@
         window.dbOnValue(window.dbRef(window.firebaseDB, 'manualOwedLog'), snap => {
             const val = snap.val() || {};
             manualOwedLog = Object.values(val).sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
-            _pmRerenderActiveTab();
+            _pmRerenderSoon();
         }, err => console.error('[ManualOwedLog] read error', err));
     }
 
@@ -946,6 +975,11 @@
     function getPartyName(partyId){
         const p = parties.find(x => x.id === partyId);
         return p ? p.name : 'Unknown';
+    }
+    // Who a purchase was bought from. Old jewellery bought via the POS ledger has no supplier.
+    function _pmPurWho(p){
+        if (p && p.source === 'pos-oj') return 'Old jewellery' + (p.acctName ? ' · ' + String(p.acctName).replace(/&/g,'&amp;').replace(/</g,'&lt;') : '');
+        return getPartyName(p && p.partyId);
     }
 
     function computeHedgeSummary(){
@@ -1058,7 +1092,7 @@ function computeCombinedAvgRate(metal){
             if (!booked) return;
             const pnl = (booked.rate - p.rate) * (p.weight || 0);
             totalPnl += pnl;
-            rows.push({ label: `${getPartyName(p.partyId)} — ${booked.label}`, metal: p.metal, weight: p.weight, rate: p.rate, bookedRate: booked.rate, pnl });
+            rows.push({ label: `${_pmPurWho(p)} — ${booked.label}`, metal: p.metal, weight: p.weight, rate: p.rate, bookedRate: booked.rate, pnl });
         });
         payments.forEach(pay => {
             if (!pay.rate) return;
@@ -1093,7 +1127,8 @@ function computeCombinedAvgRate(metal){
     }
 
     function _purchaseRow(p){
-        const partyName = getPartyName(p.partyId);
+        const partyName = _pmPurWho(p);
+        const fromPos = p.source === 'pos-oj';
         return `
             <div style="display:flex; justify-content:space-between; align-items:center; background:var(--surface); border-radius:var(--radius); padding:10px 14px; margin-bottom:8px; box-shadow:0 1px 6px rgba(0,0,0,.06); ${p.status === 'credit' ? 'border-left:3px solid #FB8C00;' : ''}">
                 <div style="font-size:12.5px;">
@@ -1101,8 +1136,8 @@ function computeCombinedAvgRate(metal){
                     <div style="font-size:10.5px; color:var(--text2);">${p.date || ''}${p.extra ? ' · +' + _pmRs(p.extra) + ' extra' : ''}${p.note ? ' · ' + p.note.replace(/</g, '&lt;') : ''}</div>
                 </div>
                 <div style="display:flex; align-items:center; gap:8px;">
-                    <button onclick="openPurchaseModal(null, '${p.id}')" title="Edit" style="background:none; border:1.5px solid var(--border); color:var(--text); font-weight:700; padding:5px 10px; border-radius:8px; font-size:11px; width:auto; margin:0;">Edit</button>
-                    <button onclick="deletePurchase('${p.id}')" title="Remove" style="background:none; border:none; color:#C62828; font-size:16px; padding:0; width:auto; box-shadow:none; margin:0;">✕</button>
+                    ${fromPos ? '<span style="font-size:10.5px; color:var(--text2); text-align:right;">from POS ledger<br>(edit there)</span>' : `<button onclick="openPurchaseModal(null, '${p.id}')" title="Edit" style="background:none; border:1.5px solid var(--border); color:var(--text); font-weight:700; padding:5px 10px; border-radius:8px; font-size:11px; width:auto; margin:0;">Edit</button>
+                    <button onclick="deletePurchase('${p.id}')" title="Remove" style="background:none; border:none; color:#C62828; font-size:16px; padding:0; width:auto; box-shadow:none; margin:0;">✕</button>`}
                 </div>
             </div>`;
     }
@@ -1364,14 +1399,86 @@ function computeCombinedAvgRate(metal){
     // Selecting "+ New Party…" prompts right away, instead of waiting
     // until Save to discover a name is needed — creates the party,
     // rebuilds the dropdown, and lands on the newly-added one selected.
+    // ── Supplier dialog: create / edit name + what the supplier supplies (Gold | Silver | 1G) ──
+    // Written to the shared `parties` node, which the POS reads live — so both apps always agree.
+    let _peId = null, _peType = '', _peResolve = null;
+    function _peBtns(){
+        document.getElementById('pe-types').innerHTML = ['Gold', 'Silver', '1G'].map(v =>
+            `<button type="button" onclick="_peSetType('${v}')" style="flex:1; padding:11px 4px; font-size:14px; font-weight:700; border-radius:10px; box-shadow:none; margin:0; border:2px solid ${_peType === v ? 'var(--gold)' : '#e0e0e0'}; background:${_peType === v ? '#fff4d6' : 'white'}; color:#333;">${v}</button>`).join('');
+    }
+    function _peSetType(t){ _peType = (_peType === t) ? '' : t; _peBtns(); }
+    function pmPartyDialog(id){
+        return new Promise(resolve => {
+            _peResolve = resolve; _peId = id || null;
+            const p = id ? parties.find(x => x.id === id) : null;
+            document.getElementById('pe-title').textContent = p ? 'Edit supplier' : 'New supplier';
+            document.getElementById('pe-name').value = p ? (p.name || '') : '';
+            document.getElementById('pe-err').textContent = '';
+            _peType = p ? (p.metalType || '') : '';
+            _peBtns();
+            document.getElementById('party-edit-modal').style.display = 'flex';
+            setTimeout(() => { const n = document.getElementById('pe-name'); if (n && !p) n.focus(); }, 60);
+        });
+    }
+    function _peFinish(v){
+        document.getElementById('party-edit-modal').style.display = 'none';
+        const r = _peResolve; _peResolve = null; _peId = null;
+        if (r) r(v);
+    }
+    async function savePartyEdit(){
+        const name = (document.getElementById('pe-name').value || '').trim();
+        const err = document.getElementById('pe-err');
+        if (!name) { err.textContent = 'Enter the supplier name.'; return; }
+        if (parties.some(p => p.id !== _peId && (p.name || '').toLowerCase() === name.toLowerCase())) { err.textContent = 'Another supplier already has that name.'; return; }
+        if (!_peId) {
+            if (!_peType) { err.textContent = 'Choose what this supplier supplies: Gold, Silver or 1G.'; return; }
+            const id = await addParty(name, _peType);
+            if (id) _peFinish(id);
+            return;
+        }
+        try {
+            await window.dbUpdate(window.dbRef(window.firebaseDB, 'parties'), { [_peId + '/name']: name, [_peId + '/metalType']: _peType || null });
+            const p = parties.find(x => x.id === _peId);
+            if (p) { p.name = name; p.metalType = _peType || null; parties.sort((a, b) => (a.name || '').localeCompare(b.name || '')); }
+            _peFinish(_peId);
+        } catch (e) {
+            console.error('[Parties] edit failed', e);
+            err.textContent = window._writeAllowed ? 'Could not save — try again.' : 'Writes are disabled — read-only copy.';
+        }
+    }
+    async function editSelectedParty(selectId){
+        const select = document.getElementById(selectId);
+        const partyId = select.value;
+        if (!partyId || partyId === '__new__') { showCustomAlert('Select a party first.'); return; }
+        const id = await pmPartyDialog(partyId);
+        if (!id) return;
+        if (selectId === 'purchase-party') {
+            select.innerHTML = parties.map(p => `<option value="${p.id}">${p.name.replace(/</g, '&lt;')}</option>`).join('') + `<option value="__new__">+ New Party…</option>`;
+            select.value = partyId;
+            _pmApplyPartyMetal(null);
+        } else {
+            _rebuildPaymentPartyDropdown();
+            select.value = partyId;
+            onPaymentPartyChange();
+        }
+        _pmRerenderSoon();
+    }
+    // Gold/Silver supplier → the purchase form offers only that metal.
+    function _pmApplyPartyMetal(existing){
+        const sel = document.getElementById('purchase-metal'); if (!sel) return;
+        const p = parties.find(x => x.id === document.getElementById('purchase-party').value);
+        const t = p && p.metalType;
+        if ((t === 'Gold' || t === 'Silver') && (!existing || existing.metal === t)) { sel.value = t; sel.disabled = true; }
+        else sel.disabled = false;
+    }
     async function onPurchasePartyChange(){
         const select = document.getElementById('purchase-party');
-        if (select.value !== '__new__') return;
-        const name = prompt('New party name:');
-        if (!name) { select.value = parties.length ? parties[0].id : '__new__'; return; }
-        const newId = await addParty(name);
+        if (select.value !== '__new__') { _pmApplyPartyMetal(null); return; }
+        const newId = await pmPartyDialog(null);
+        if (!newId) { select.value = parties.length ? parties[0].id : '__new__'; return; }
         select.innerHTML = parties.map(p => `<option value="${p.id}">${p.name.replace(/</g, '&lt;')}</option>`).join('') + `<option value="__new__">+ New Party…</option>`;
         select.value = newId || '__new__';
+        _pmApplyPartyMetal(null);
     }
 
     // Removal is safe to apply optimistically (unlike adding — see
@@ -1422,6 +1529,7 @@ function computeCombinedAvgRate(metal){
         else if (!parties.length) onPurchasePartyChange(); // only option is "+ New Party…" — onchange can never fire with one option, so ask right away
 
         document.getElementById('purchase-metal').value = existing ? existing.metal : 'Gold';
+        _pmApplyPartyMetal(existing);
         document.getElementById('purchase-weight').value = existing ? existing.weight : '';
         document.getElementById('purchase-date').value = existing ? existing.date : new Date().toISOString().slice(0, 10);
         document.getElementById('purchase-rate').value = (existing && (existing.status === 'paid' || existing.rate > 0)) ? existing.rate : '';
@@ -1470,9 +1578,7 @@ function computeCombinedAvgRate(metal){
         const extra = parseFloat(document.getElementById('purchase-extra').value) || 0;
 
         if (partyId === '__new__') {
-            const name = prompt('New party name:');
-            if (!name) return;
-            partyId = await addParty(name);
+            partyId = await pmPartyDialog(null);
             if (!partyId) return;
         }
         if (!partyId) { showCustomAlert('Select a party.'); return; }
@@ -1524,7 +1630,10 @@ function computeCombinedAvgRate(metal){
     }
 
     async function deletePurchase(id){
-        showCustomConfirm('Delete this purchase record?', 'Confirm', async () => {
+        const _pu = purchases.find(p => p.id === id);
+        if (_pu && _pu.source === 'pos-oj') { showCustomAlert('This purchase comes from an Old Jewellery entry in the POS ledger. Delete that ledger entry in the POS instead.'); return; }
+        const _puTxt = _pu ? ` (${getPartyName(_pu.partyId)}${_pu.weight ? ' · ' + _pu.weight + 'g' : ''}${_pu.amount ? ' · ₹' + Math.round(_pu.amount).toLocaleString('en-IN') : ''})` : '';
+        showCustomConfirm('Delete this purchase record' + _puTxt + '? This cannot be undone.', 'Delete', async () => {
             try {
                 await window.dbUpdate(window.dbRef(window.firebaseDB, 'purchases'), { [id]: null });
                 purchases = purchases.filter(p => p.id !== id);
@@ -1733,6 +1842,33 @@ function computeCombinedAvgRate(metal){
     const _cardCss = 'background:var(--surface); border-radius:var(--radius); padding:14px; box-shadow:0 1px 6px rgba(0,0,0,.06); margin-bottom:12px;';
     const _hdCss = 'font-size:10px; font-weight:700; letter-spacing:.08em; color:var(--text2); text-transform:uppercase; margin-bottom:10px;';
 
+    // ── Donut chart helpers (Report) ──
+    const _RP_PAL = ['#2E7D32', '#1565C0', '#E65100', '#8E24AA', '#00897B', '#F9A825', '#C62828', '#3949AB', '#6D4C41', '#7CB342'];
+    function _rpDonut(slices, centerVal, centerLbl){
+        const R = 44, C = 2 * Math.PI * R;
+        const live = slices.filter(x => x.v > 0);
+        const tot = live.reduce((a, x) => a + x.v, 0);
+        const gap = live.length > 1 ? 1.4 : 0;
+        let off = 0, segs = '';
+        live.forEach(x => {
+            const len = x.v / tot * C, d = Math.max(0.6, len - gap);
+            segs += `<circle cx="60" cy="60" r="${R}" fill="none" stroke="${x.c}" stroke-width="16" stroke-dasharray="${d.toFixed(2)} ${(C - d).toFixed(2)}" stroke-dashoffset="${(-off).toFixed(2)}" transform="rotate(-90 60 60)"/>`;
+            off += len;
+        });
+        return `<svg viewBox="0 0 120 120" width="176" height="176" style="display:block; flex-shrink:0;"><circle cx="60" cy="60" r="${R}" fill="none" stroke="#E8F5E9" stroke-width="16"/>${segs}<text x="60" y="59" text-anchor="middle" font-size="12.5" font-weight="800" fill="#1a1a1a">${_rpEsc(centerVal)}</text><text x="60" y="72" text-anchor="middle" font-size="7" letter-spacing=".6" fill="#6B8F73">${_rpEsc(centerLbl)}</text></svg>`;
+    }
+    function _rpLegend(slices, total){
+        return slices.map(x => {
+            const pct = total ? x.v / total * 100 : 0;
+            return `<div style="display:flex; align-items:center; gap:10px; padding:8px 0; border-top:1px solid var(--border);">
+                <span style="width:12px; height:12px; border-radius:50%; background:${x.c}; flex-shrink:0;"></span>
+                <span style="flex:1; font-size:13px; font-weight:600;">${_rpEsc(x.l)}</span>
+                <span style="font-size:13px; font-weight:800;">${_rpFmt(x.v)}</span>
+                <span style="width:40px; text-align:right; font-size:11px; font-weight:700; color:${x.c};">${pct > 0 && pct < 1 ? '<1' : pct.toFixed(0)}%</span>
+            </div>`;
+        }).join('');
+    }
+
     // ── Per-piece supplies (credit) card in the Purchase tab ──
     function renderPieceSupplies(){
         const el = document.getElementById('piece-supplies-card'); if (!el) return;
@@ -1772,21 +1908,29 @@ function computeCombinedAvgRate(metal){
                 html += r.list.map(x => `<div style="display:flex; justify-content:space-between; align-items:center; gap:8px; font-size:12px; padding:5px 0 5px 18px; color:var(--text2);">
                     <div style="flex:1;">${_rpShort(x.date || (x.createdAt || '').slice(0,10))} · ${x.kind === 'payment' ? 'Paid' : 'Bill'}${x.desc ? ' · ' + _rpEsc(x.desc) : ''}${x.qty ? ' · ' + x.qty + ' pc' : ''}</div>
                     <div style="font-weight:700; color:${x.kind === 'payment' ? '#2E7D32' : '#C62828'};">${x.kind === 'payment' ? '−' : '+'}${_rpFmt(x.amount)}</div>
-                    ${x.source === 'pos' ? '' : `<button onclick="event.stopPropagation(); deletePieceRecord('${_rpEnc(x.id)}')" style="width:auto; margin:0; padding:2px 8px; font-size:12px; background:none; border:none; color:#C62828; box-shadow:none;">✕</button>`}
+                    ${x.source === 'pos' ? '' : `<button onclick="event.stopPropagation(); openPieceBillModal('${_rpEnc(x.id)}')" title="Edit" style="width:auto; margin:0; padding:2px 8px; font-size:13px; background:none; border:none; color:var(--text2); box-shadow:none;">✎</button><button onclick="event.stopPropagation(); deletePieceRecord('${_rpEnc(x.id)}')" style="width:auto; margin:0; padding:2px 8px; font-size:12px; background:none; border:none; color:#C62828; box-shadow:none;">✕</button>`}
                 </div>`).join('');
             }
         });
         el.innerHTML = html + '</div>';
     }
     function _pieceToggle(enc){ const k = decodeURIComponent(enc); _pieceOpen[k] = !_pieceOpen[k]; renderPieceSupplies(); }
-    function openPieceBillModal(){
+    let _pieceEditId = null;   // id of the bill being edited (null = adding a new one)
+    function openPieceBillModal(enc){
+        const rec = enc ? pieceSupplies.find(r => r.id === decodeURIComponent(enc)) : null;
+        _pieceEditId = rec ? rec.id : null;
         const sel = document.getElementById('piece-bill-party');
         sel.innerHTML = '<option value="">— Select supplier —</option>' + parties.map(p => `<option value="${_rpEsc(p.id)}">${_rpEsc(p.name)}</option>`).join('');
-        ['piece-bill-desc','piece-bill-qty','piece-bill-amount'].forEach(id => { document.getElementById(id).value = ''; });
-        document.getElementById('piece-bill-date').value = _rpDate(new Date());
+        document.getElementById('piece-bill-desc').value = rec ? (rec.desc || '') : '';
+        document.getElementById('piece-bill-qty').value = rec && rec.qty ? rec.qty : '';
+        document.getElementById('piece-bill-amount').value = rec ? (rec.amount || '') : '';
+        if (rec) sel.value = rec.partyId;
+        document.getElementById('piece-bill-date').value = rec ? (rec.date || (rec.createdAt || '').slice(0, 10) || _rpDate(new Date())) : _rpDate(new Date());
+        const h = document.querySelector('#piece-bill-panel h3'); if (h) h.textContent = rec ? 'Edit Per-piece Bill' : 'Per-piece Supplies Bill';
+        const sb = document.querySelector('#piece-bill-panel button[onclick="savePieceBill()"]'); if (sb) sb.textContent = rec ? '✓ Update Bill' : '✓ Save Bill';
         document.getElementById('piece-bill-modal').classList.add('show');
     }
-    function closePieceBillModal(){ document.getElementById('piece-bill-modal').classList.remove('show'); }
+    function closePieceBillModal(){ document.getElementById('piece-bill-modal').classList.remove('show'); _pieceEditId = null; }
     async function savePieceBill(){
         const partyId = document.getElementById('piece-bill-party').value;
         const desc = (document.getElementById('piece-bill-desc').value || '').trim();
@@ -1795,16 +1939,21 @@ function computeCombinedAvgRate(metal){
         const date = document.getElementById('piece-bill-date').value || _rpDate(new Date());
         if (!partyId) { showCustomAlert('Select a supplier.'); return; }
         if (!(amount > 0)) { showCustomAlert('Enter the bill amount.'); return; }
-        const id = crypto.randomUUID();
+        const old = _pieceEditId ? pieceSupplies.find(r => r.id === _pieceEditId) : null;
+        if (_pieceEditId && (!old || old.source === 'pos')) { showCustomAlert('This bill can no longer be edited.'); closePieceBillModal(); return; }
+        const id = old ? old.id : crypto.randomUUID();
         const rec = { id, partyId, track: 'B', kind: 'bill', desc, qty, amount, date, createdAt: new Date(date + 'T12:00:00.000Z').toISOString(), source: 'pm' };
         try {
             await window.dbUpdate(window.dbRef(window.firebaseDB, 'pieceSupplies'), { [id]: rec });
-            closePieceBillModal(); invToast('✅ Bill saved');
+            const wasEdit = !!old;
+            closePieceBillModal(); invToast(wasEdit ? '✅ Bill updated' : '✅ Bill saved');
         } catch (e) { console.error(e); showCustomAlert(window._writeAllowed ? 'Could not save — try again.' : 'Writes are disabled — read-only copy.'); }
     }
     function deletePieceRecord(enc){
         const id = decodeURIComponent(enc);
-        showCustomConfirm('Delete this per-piece record?', 'Delete', async () => {
+        const _pr = pieceSupplies.find(r => r.id === id);
+        const _prTxt = _pr ? ` (${_pr.kind === 'payment' ? 'payment' : 'bill'} ₹${Math.round(_pr.amount || 0).toLocaleString('en-IN')}${_pr.desc ? ' · ' + _rpEsc(_pr.desc) : ''})` : '';
+        showCustomConfirm('Delete this per-piece record' + _prTxt + '? This cannot be undone.', 'Delete', async () => {
             try { await window.dbUpdate(window.dbRef(window.firebaseDB, 'pieceSupplies'), { [id]: null }); } catch (e) { console.error(e); }
         });
     }
@@ -1837,15 +1986,19 @@ function computeCombinedAvgRate(metal){
     }
     function rpToggle(enc){ const k = decodeURIComponent(enc); _rpOpen[k] = !_rpOpen[k]; renderReportTab(); }
 
+    const _RP_OJ = 'Old Jewellery';
     function _rpSplit(e){
+        if (e.oj) return { cash: 0, dig: 0, oj: e.amount || 0 };   // old jewellery exchanged on an invoice: neither cash nor UPI
         let cash;
         if (e.cashPortion !== undefined) cash = e.cashPortion;
         else cash = (e.mode === 'upi') ? 0 : (e.amount || 0);
         cash = Math.max(0, Math.min(e.amount || 0, cash));
-        return { cash, dig: (e.amount || 0) - cash };
+        return { cash, dig: (e.amount || 0) - cash, oj: 0 };
     }
     // Turns cash book entries into { dir, group, account } rows
     function _rpClassify(e){
+        if (e.oj === 'in') return { dir: 'in', group: 'Sales', account: 'Old jewellery exchanged (non-cash)' };
+        if (e.oj === 'out') return { dir: 'out', group: _RP_OJ, account: 'Exchanged on invoices' };
         if (e.type === 'sale') {
             const src = e.source === 'installment' ? 'Installment collections' : e.source === 'credit' ? 'Credit collections' : 'Sales';
             return { dir: 'in', group: src, account: 'All receipts' };
@@ -1853,16 +2006,55 @@ function computeCombinedAvgRate(metal){
         if (e.type === 'out') return { dir: 'out', group: 'Customer refunds', account: 'Refunds' };
         if (e.type === 'in') return { dir: 'in', group: e.categoryName || 'Other income', account: e.accountName || 'Unassigned' };
         const isSup = e.categoryId === 'cat_supplier' || !!e.supplier;
+        if (e.categoryId === 'cat_oldjewellery') return { dir: 'out', group: _RP_OJ, account: e.accountName || 'Unassigned' };
         return { dir: 'out', group: e.categoryName || (isSup ? 'Supplier' : 'Unassigned'), account: (isSup && e.supplier && e.supplier.partyName) ? e.supplier.partyName : (e.accountName || 'Unassigned') };
     }
     function _rpTrackOk(t){ return t === 'B'; }   // Report is Track B data only
-    function _rpEntries(from, to){ return _pmCashSrc().filter(e => _rpTrackOk(e.track || 'A') && e.date >= from && e.date <= to); }
+    // Old jewellery taken in on INVOICES (value only — no weight is tracked there). Per invoice, two non-cash rows are added so the
+    // Report shows the full invoice amount (tax + discount included, BEFORE old jewellery is deducted):
+    //   Money in  → Sales / "Old jewellery exchanged"   (adds the old-jewellery value back onto the cash/UPI actually received)
+    //   Money out → Old Jewellery / "Exchanged on invoices"
+    // Net is unchanged (they cancel). If the old jewellery exceeded the bill and cash was refunded, the refund is folded into the
+    // "in" row (old jewellery − refund = invoice total) and hidden from "Customer refunds" so it is not counted twice.
+    // Rows are dated with the invoice's own cash book entry (same day as its receipt), and only from the cash book's go-live date on.
+    function _rpOjPlan(){
+        const res = { synth: [], absorbed: new Set() };
+        const cash = _pmCashSrc().filter(e => _rpTrackOk(e.track || 'A'));
+        if (!cash.length) return res;
+        let live = '';
+        cash.forEach(e => { if (e.date && (!live || e.date < live)) live = e.date; });
+        const byInv = {};
+        cash.forEach(e => { if (e.invoiceId && (e.type === 'sale' || e.type === 'out')) (byInv[e.invoiceId] = byInv[e.invoiceId] || []).push(e); });
+        _pmSalesSrc().forEach(inv => {
+            if (!inv || inv.draft || !_rpTrackOk(inv.track)) return;
+            const og = (inv.ogItems || []).reduce((s, i) => s + (parseFloat(i.value) || 0), 0);
+            if (!(og > 0)) return;
+            const linked = (byInv[inv.id] || []).slice().sort((a, b) => new Date(a.ts) - new Date(b.ts));
+            const anchor = linked.find(e => e.type === 'sale') || linked[0] || null;
+            const date = anchor ? anchor.date : _rpDate(new Date(inv.timestamp));
+            if (!date || date < live) return;
+            const ts = anchor ? anchor.ts : inv.timestamp;
+            const refunds = linked.filter(e => e.type === 'out');
+            const rSum = refunds.reduce((s, e) => s + (e.amount || 0), 0);
+            let inAmt = og;
+            if (rSum > 0 && rSum <= og + 0.5) { refunds.forEach(e => res.absorbed.add(e.id)); inAmt = Math.max(0, og - rSum); }
+            const base = { track: 'B', ts, date, cashPortion: 0, mode: 'exchange', invoiceId: inv.id, source: 'oj-exchange', note: 'Bill #' + (inv.billNo != null ? inv.billNo : '?') + ' · old jewellery taken' };
+            if (inAmt > 0) res.synth.push({ ...base, id: 'ojin-' + inv.id, type: 'sale', amount: inAmt, oj: 'in' });
+            res.synth.push({ ...base, id: 'ojout-' + inv.id, type: 'expense', amount: og, oj: 'out' });
+        });
+        return res;
+    }
+    function _rpEntries(from, to){
+        const plan = _rpOjPlan();
+        return _pmCashSrc().filter(e => _rpTrackOk(e.track || 'A') && !plan.absorbed.has(e.id) && e.date >= from && e.date <= to)
+            .concat(plan.synth.filter(e => e.date >= from && e.date <= to));
+    }
     function _rpTotals(entries){
-        const t = { in: 0, out: 0, inCash: 0, inDig: 0, outCash: 0, outDig: 0 };
+        const t = { in: 0, out: 0, inCash: 0, inDig: 0, inOj: 0, outCash: 0, outDig: 0, outOj: 0 };
         entries.forEach(e => {
             const c = _rpClassify(e), sp = _rpSplit(e);
-            if (c.dir === 'in') { t.in += e.amount || 0; t.inCash += sp.cash; t.inDig += sp.dig; }
-            else { t.out += e.amount || 0; t.outCash += sp.cash; t.outDig += sp.dig; }
+            if (c.dir === 'in') { t.in += e.amount || 0; t.inCash += sp.cash; t.inDig += sp.dig; t.inOj += sp.oj; }
+            else { t.out += e.amount || 0; t.outCash += sp.cash; t.outDig += sp.dig; t.outOj += sp.oj; }
         });
         return t;
     }
@@ -1907,8 +2099,8 @@ function computeCombinedAvgRate(metal){
                 <div><div style="font-size:17px; font-weight:800; color:${net >= 0 ? '#2E7D32' : '#C62828'};">${net < 0 ? '−' : ''}${_rpFmt(Math.abs(net))}</div><div style="font-size:11px; color:var(--text2);">Net</div></div>
             </div>
             <div style="font-size:11px; color:var(--text2); margin-top:10px; line-height:1.6;">
-                In: cash ${_rpFmt(T.inCash)} · UPI/card ${_rpFmt(T.inDig)}<br>
-                Out: cash ${_rpFmt(T.outCash)} · UPI/card ${_rpFmt(T.outDig)}
+                In: cash ${_rpFmt(T.inCash)} · UPI/card ${_rpFmt(T.inDig)}${T.inOj > 0 ? ' · old jewellery ' + _rpFmt(T.inOj) : ''}<br>
+                Out: cash ${_rpFmt(T.outCash)} · UPI/card ${_rpFmt(T.outDig)}${T.outOj > 0 ? ' · old jewellery ' + _rpFmt(T.outOj) : ''}
             </div>
             <div style="font-size:11px; color:var(--text2); margin-top:8px; border-top:1px solid var(--border); padding-top:8px; line-height:1.6;">
                 vs previous ${days} day${days > 1 ? 's' : ''} (${_rpShort(prevFrom)} – ${_rpShort(prevTo)}):
@@ -1916,48 +2108,60 @@ function computeCombinedAvgRate(metal){
             </div>
         </div>`;
 
-        // 2. Money flow
-        const supOut = (tree.out['Supplier'] || {}).total || 0;
-        const refunds = (tree.out['Customer refunds'] || {}).total || 0;
-        const otherOut = Math.max(0, T.out - supOut - refunds);
-        const flow = [
-            ['Received', T.in, '#2E7D32'],
-            ['Suppliers', supOut, '#1565C0'],
-            ['Expenses & other', otherOut, '#E65100'],
-            ['Customer refunds', refunds, '#8E24AA'],
-            [net >= 0 ? 'Left over' : 'Shortfall', Math.abs(net), net >= 0 ? '#2E7D32' : '#C62828']
-        ];
-        const fmax = Math.max(1, T.in, T.out);
-        html += `<div style="${_cardCss}"><div style="${_hdCss}">Where the money went</div>` + flow.map(f => `
-            <div style="margin-bottom:8px;"><div style="display:flex; justify-content:space-between; font-size:12px; margin-bottom:3px;"><span>${f[0]}</span><b>${_rpFmt(f[1])}</b></div>
-            <div style="height:8px; background:var(--border); border-radius:4px; overflow:hidden;"><div style="height:100%; width:${Math.min(100, f[1] / fmax * 100)}%; background:${f[2]};"></div></div></div>`).join('') + '</div>';
+        // 2. Where the money went — ONE donut by category (expandable), with Received / Left over underneath
+        const chip = (lbl, val, col) => `<div style="flex:1; min-width:110px; background:${col}14; border:1px solid ${col}33; border-radius:12px; padding:9px 10px; text-align:center;"><div style="font-size:10px; font-weight:700; letter-spacing:.05em; color:${col}; text-transform:uppercase;">${lbl}</div><div style="font-size:15px; font-weight:800; color:${col}; margin-top:2px;">${_rpFmt(val)}</div></div>`;
+        const flowChips = `<div style="display:flex; gap:8px; margin:6px 0 10px;">${chip('Received', T.in, '#2E7D32')}${chip(net >= 0 ? 'Left over' : 'Shortfall', Math.abs(net), net >= 0 ? '#2E7D32' : '#C62828')}</div>`;
 
-        // 3. Breakdown trees (out, then in)
-        const treeCard = (dir, title) => {
+        // 3. Breakdown (out, then in) — donut by group; the legend rows expand into accounts and entries
+        const treeCard = (dir, title, extra) => {
             const groups = Object.keys(tree[dir]).sort((a, b) => tree[dir][b].total - tree[dir][a].total);
-            if (!groups.length) return '';
+            if (!groups.length) return extra ? `<div style="${_cardCss}"><div style="${_hdCss}">${title}</div>${extra}</div>` : '';
             const total = dir === 'in' ? T.in : T.out;
-            let h = `<div style="${_cardCss}"><div style="${_hdCss}">${title}</div>`;
+            const col = {}; groups.forEach((g, i) => { col[g] = _RP_PAL[i % _RP_PAL.length]; });
+            const slices = groups.map(g => ({ l: g, v: tree[dir][g].total, c: col[g] }));
+            let h = `<div style="${_cardCss}"><div style="${_hdCss}">${title}</div>
+                <div style="display:flex; justify-content:center; margin-bottom:8px;">${_rpDonut(slices, _rpFmt(total), dir === 'in' ? 'MONEY IN' : 'MONEY OUT')}</div>${extra || ''}`;
             groups.forEach(g => {
                 const gk = 'g|' + dir + '|' + g, gOpen = !!_rpOpen[gk], G = tree[dir][g];
-                h += `<div onclick="rpToggle('${_rpEnc(gk)}')" style="padding:9px 0; border-top:1px solid var(--border); cursor:pointer; user-select:none;">
-                    <div style="display:flex; justify-content:space-between; font-size:13px; font-weight:700;"><span><span style="font-size:11px; color:var(--text2); margin-right:6px;">${gOpen ? '▾' : '▸'}</span>${_rpEsc(g)}</span><span>${_rpFmt(G.total)} <span style="font-size:11px; color:var(--text2); font-weight:600;">${total ? (G.total / total * 100).toFixed(0) : 0}%</span></span></div>
-                    <div style="height:5px; background:var(--border); border-radius:3px; margin-top:5px; overflow:hidden;"><div style="height:100%; width:${total ? G.total / total * 100 : 0}%; background:${dir === 'in' ? '#2E7D32' : 'var(--gold)'};"></div></div>
+                const pct = total ? (G.total / total * 100) : 0;
+                h += `<div onclick="rpToggle('${_rpEnc(gk)}')" style="display:flex; align-items:center; gap:10px; padding:10px 0; border-top:1px solid var(--border); cursor:pointer; user-select:none;">
+                    <span style="width:12px; height:12px; border-radius:50%; background:${col[g]}; flex-shrink:0;"></span>
+                    <span style="flex:1; min-width:0; font-size:13px; font-weight:700;">${_rpEsc(g)}<span style="font-size:10px; color:var(--text2); margin-left:6px;">${gOpen ? '▾' : '▸'}</span></span>
+                    <span style="font-size:13px; font-weight:800;">${_rpFmt(G.total)}</span>
+                    <span style="width:40px; text-align:right; font-size:11px; font-weight:700; color:${col[g]};">${pct < 1 && pct > 0 ? '<1' : pct.toFixed(0)}%</span>
                 </div>`;
                 if (gOpen) {
                     Object.keys(G.accts).sort((a, b) => G.accts[b].total - G.accts[a].total).forEach(an => {
                         const ak = 'a|' + dir + '|' + g + '|' + an, aOpen = !!_rpOpen[ak], A = G.accts[an];
-                        h += `<div onclick="rpToggle('${_rpEnc(ak)}')" style="display:flex; justify-content:space-between; font-size:12px; padding:6px 0 6px 18px; cursor:pointer; user-select:none;"><span><span style="font-size:10px; color:var(--text2); margin-right:5px;">${aOpen ? '▾' : '▸'}</span>${_rpEsc(an)}</span><b>${_rpFmt(A.total)}</b></div>`;
+                        h += `<div onclick="rpToggle('${_rpEnc(ak)}')" style="display:flex; justify-content:space-between; font-size:12px; padding:6px 0 6px 22px; cursor:pointer; user-select:none;"><span><span style="font-size:10px; color:var(--text2); margin-right:5px;">${aOpen ? '▾' : '▸'}</span>${_rpEsc(an)}</span><b>${_rpFmt(A.total)}</b></div>`;
                         if (aOpen) {
-                            h += A.list.slice().sort((x, y) => new Date(y.ts) - new Date(x.ts)).map(e => `<div style="display:flex; justify-content:space-between; gap:8px; font-size:11px; color:var(--text2); padding:3px 0 3px 36px;"><span style="flex:1;">${_rpShort(e.date)}${e.mode === 'upi' ? ' · UPI' : ''}${e.note ? ' · ' + _rpEsc(e.note) : ''}</span><span>${_rpFmt(e.amount)}</span></div>`).join('');
+                            h += A.list.slice().sort((x, y) => new Date(y.ts) - new Date(x.ts)).map(e => `<div style="display:flex; justify-content:space-between; gap:8px; font-size:11px; color:var(--text2); padding:3px 0 3px 40px;"><span style="flex:1;">${_rpShort(e.date)}${e.mode === 'upi' ? ' · UPI' : ''}${e.note ? ' · ' + _rpEsc(e.note) : ''}</span><span>${_rpFmt(e.amount)}</span></div>`).join('');
                         }
                     });
                 }
             });
             return h + '</div>';
         };
-        html += treeCard('out', 'Money out — by category');
+        html += treeCard('out', 'Where the money went — by category', flowChips);
         html += treeCard('in', 'Money in — by source');
+
+        // Old jewellery — ledger purchases (weight + rate known) and invoice exchanges (value only), combined
+        {
+            const ojL = entries.filter(e => e.type === 'expense' && !e.oj && e.categoryId === 'cat_oldjewellery');
+            const ojI = entries.filter(e => e.oj === 'out');
+            if (ojL.length || ojI.length) {
+                const lAmt = ojL.reduce((s, e) => s + (e.amount || 0), 0), iAmt = ojI.reduce((s, e) => s + (e.amount || 0), 0);
+                const mt = { Gold: { g: 0, v: 0 }, Silver: { g: 0, v: 0 } }; let noWt = 0;
+                ojL.forEach(e => { const o = e.oldJewellery; if (o && mt[o.metal] && o.weight > 0) { mt[o.metal].g += o.weight; mt[o.metal].v += e.amount || 0; } else noWt += e.amount || 0; });
+                const wl = ['Gold', 'Silver'].filter(m => mt[m].g > 0).map(m => `${m}: ${mt[m].g.toFixed(2)}g @ avg ₹${(mt[m].v / mt[m].g).toFixed(0)}/g`);
+                const row = (a, b, sub) => `<div style="padding:8px 0; border-top:1px solid var(--border);"><div style="display:flex; justify-content:space-between; font-size:13px; font-weight:700;"><span>${a}</span><span>${b}</span></div>${sub ? `<div style="font-size:11px; color:var(--text2); line-height:1.6; margin-top:2px;">${sub}</div>` : ''}</div>`;
+                html += `<div style="${_cardCss}"><div style="${_hdCss}">Old jewellery — combined</div>
+                    <div style="display:flex; justify-content:space-between; font-size:15px; font-weight:800; margin-bottom:4px;"><span>Total</span><span>${_rpFmt(lAmt + iAmt)}</span></div>
+                    ${row('Bought via ledger (cash/UPI paid)', _rpFmt(lAmt), (wl.join(' · ') || '—') + (noWt > 0 ? '<br>Without weight (older entries): ' + _rpFmt(noWt) : ''))}
+                    ${row('Taken on invoices (exchange)', _rpFmt(iAmt), ojI.length + ' bill' + (ojI.length === 1 ? '' : 's') + ' · value only, weight not tracked')}
+                    <div style="font-size:10.5px; color:var(--text2); margin-top:6px;">Ledger weights also count as metal bought in the Purchase tab and in Metal position below.</div></div>`;
+            }
+        }
 
         // 4. Suppliers
         const sup = {};
@@ -1998,7 +2202,9 @@ function computeCombinedAvgRate(metal){
 
         // 5. Expenses highlights
         const expAccts = [];
-        Object.keys(tree.out).forEach(g => { if (g === 'Supplier' || g === 'Customer refunds') return; Object.keys(tree.out[g].accts).forEach(a => expAccts.push({ name: a, group: g, total: tree.out[g].accts[a].total })); });
+        // Not expenses: supplier payments, old jewellery (metal purchase), customer refunds and VC (repaying borrowed money).
+        const _notExpense = g => ['supplier', 'customer refunds', 'vc', 'old jewellery'].indexOf(String(g).trim().toLowerCase()) >= 0;
+        Object.keys(tree.out).forEach(g => { if (_notExpense(g)) return; Object.keys(tree.out[g].accts).forEach(a => expAccts.push({ name: a, group: g, total: tree.out[g].accts[a].total })); });
         expAccts.sort((a, b) => b.total - a.total);
         if (expAccts.length) {
             const expTotal = expAccts.reduce((s, x) => s + x.total, 0);
