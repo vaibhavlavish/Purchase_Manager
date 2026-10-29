@@ -1833,7 +1833,7 @@ function computeCombinedAvgRate(metal){
     const _rpRange = { from: '', to: '' };
     let _pieceOpen = {};
 
-    function _rpFmt(n){ return '₹' + Math.round(n || 0).toLocaleString('en-IN'); }
+    function _rpFmt(n){ const r = Math.round(n || 0); return (r < 0 ? '−' : '') + '₹' + Math.abs(r).toLocaleString('en-IN'); }
     function _rpEsc(t){ return String(t == null ? '' : t).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
     function _rpDate(d){ return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0'); }
     function _rpEnc(k){ return encodeURIComponent(k).replace(/'/g, '%27'); }
@@ -1986,67 +1986,36 @@ function computeCombinedAvgRate(metal){
     function rpToggle(enc){ const k = decodeURIComponent(enc); _rpOpen[k] = !_rpOpen[k]; renderReportTab(); }
 
     const _RP_OJ = 'Old Jewellery';
+    // Returns = ledger account (under the old-jewellery category) whose name contains "return": a refund / replacement paid to a customer.
+    // It never carries weight/rate and never creates a Purchase Manager purchase.
+    function _rpIsReturns(e){ return /return/i.test(e.accountName || ''); }
     function _rpSplit(e){
-        if (e.oj) return { cash: 0, dig: 0, oj: e.amount || 0 };   // old jewellery exchanged on an invoice: neither cash nor UPI
+        const amt = e.amount || 0, sign = amt < 0 ? -1 : 1, a = Math.abs(amt);
         let cash;
-        if (e.cashPortion !== undefined) cash = e.cashPortion;
-        else cash = (e.mode === 'upi') ? 0 : (e.amount || 0);
-        cash = Math.max(0, Math.min(e.amount || 0, cash));
-        return { cash, dig: (e.amount || 0) - cash, oj: 0 };
+        if (e.cashPortion !== undefined) cash = Math.abs(e.cashPortion);
+        else cash = (e.mode === 'upi') ? 0 : a;
+        cash = Math.max(0, Math.min(a, cash));
+        return { cash: sign * cash, dig: sign * (a - cash), oj: 0 };
     }
     // Turns cash book entries into { dir, group, account } rows
     function _rpClassify(e){
-        if (e.oj === 'in') return { dir: 'in', group: 'Sales', account: 'Old jewellery exchanged (non-cash)' };
-        if (e.oj === 'out') return { dir: 'out', group: _RP_OJ, account: 'Exchanged on invoices' };
+        // Money paid back to a customer on a bill is netted off Sales (entry arrives here with a negative amount)
+        if (e._refund || e.type === 'out') return { dir: 'in', group: 'Sales', account: 'Refunded to customers' };
         if (e.type === 'sale') {
             const src = e.source === 'installment' ? 'Installment collections' : e.source === 'credit' ? 'Credit collections' : 'Sales';
             return { dir: 'in', group: src, account: 'All receipts' };
         }
-        if (e.type === 'out') return { dir: 'out', group: 'Customer refunds', account: 'Refunds' };
         if (e.type === 'in') return { dir: 'in', group: e.categoryName || 'Other income', account: e.accountName || 'Unassigned' };
         const isSup = e.categoryId === 'cat_supplier' || !!e.supplier;
-        if (e.categoryId === 'cat_oldjewellery') return { dir: 'out', group: _RP_OJ, account: e.accountName || 'Unassigned' };
+        if (e.categoryId === 'cat_oldjewellery') return { dir: 'out', group: _rpIsReturns(e) ? 'Returns' : _RP_OJ, account: e.accountName || 'Unassigned' };
         return { dir: 'out', group: e.categoryName || (isSup ? 'Supplier' : 'Unassigned'), account: (isSup && e.supplier && e.supplier.partyName) ? e.supplier.partyName : (e.accountName || 'Unassigned') };
     }
     function _rpTrackOk(t){ return t === 'B'; }   // Report is Track B data only
-    // Old jewellery taken in on INVOICES (value only — no weight is tracked there). Per invoice, two non-cash rows are added so the
-    // Report shows the full invoice amount (tax + discount included, BEFORE old jewellery is deducted):
-    //   Money in  → Sales / "Old jewellery exchanged"   (adds the old-jewellery value back onto the cash/UPI actually received)
-    //   Money out → Old Jewellery / "Exchanged on invoices"
-    // Net is unchanged (they cancel). If the old jewellery exceeded the bill and cash was refunded, the refund is folded into the
-    // "in" row (old jewellery − refund = invoice total) and hidden from "Customer refunds" so it is not counted twice.
-    // Rows are dated with the invoice's own cash book entry (same day as its receipt), and only from the cash book's go-live date on.
-    function _rpOjPlan(){
-        const res = { synth: [], absorbed: new Set() };
-        const cash = _pmCashSrc().filter(e => _rpTrackOk(e.track || 'A'));
-        if (!cash.length) return res;
-        let live = '';
-        cash.forEach(e => { if (e.date && (!live || e.date < live)) live = e.date; });
-        const byInv = {};
-        cash.forEach(e => { if (e.invoiceId && (e.type === 'sale' || e.type === 'out')) (byInv[e.invoiceId] = byInv[e.invoiceId] || []).push(e); });
-        _pmSalesSrc().forEach(inv => {
-            if (!inv || inv.draft || !_rpTrackOk(inv.track)) return;
-            const og = (inv.ogItems || []).reduce((s, i) => s + (parseFloat(i.value) || 0), 0);
-            if (!(og > 0)) return;
-            const linked = (byInv[inv.id] || []).slice().sort((a, b) => new Date(a.ts) - new Date(b.ts));
-            const anchor = linked.find(e => e.type === 'sale') || linked[0] || null;
-            const date = anchor ? anchor.date : _rpDate(new Date(inv.timestamp));
-            if (!date || date < live) return;
-            const ts = anchor ? anchor.ts : inv.timestamp;
-            const refunds = linked.filter(e => e.type === 'out');
-            const rSum = refunds.reduce((s, e) => s + (e.amount || 0), 0);
-            let inAmt = og;
-            if (rSum > 0 && rSum <= og + 0.5) { refunds.forEach(e => res.absorbed.add(e.id)); inAmt = Math.max(0, og - rSum); }
-            const base = { track: 'B', ts, date, cashPortion: 0, mode: 'exchange', invoiceId: inv.id, source: 'oj-exchange', note: 'Bill #' + (inv.billNo != null ? inv.billNo : '?') + ' · old jewellery taken' };
-            if (inAmt > 0) res.synth.push({ ...base, id: 'ojin-' + inv.id, type: 'sale', amount: inAmt, oj: 'in' });
-            res.synth.push({ ...base, id: 'ojout-' + inv.id, type: 'expense', amount: og, oj: 'out' });
-        });
-        return res;
-    }
+    // Report follows the CASH BOOK only (never invoices). Money handed back to a customer on a bill (type 'out')
+    // is shown as a negative in Sales, so Sales = amount actually received minus amount paid back.
     function _rpEntries(from, to){
-        const plan = _rpOjPlan();
-        return _pmCashSrc().filter(e => _rpTrackOk(e.track || 'A') && !plan.absorbed.has(e.id) && e.date >= from && e.date <= to)
-            .concat(plan.synth.filter(e => e.date >= from && e.date <= to));
+        return _pmCashSrc().filter(e => _rpTrackOk(e.track || 'A') && e.date >= from && e.date <= to)
+            .map(e => e.type === 'out' ? { ...e, amount: -(e.amount || 0), _refund: true } : e);
     }
     function _rpTotals(entries){
         const t = { in: 0, out: 0, inCash: 0, inDig: 0, inOj: 0, outCash: 0, outDig: 0, outOj: 0 };
@@ -2144,21 +2113,18 @@ function computeCombinedAvgRate(metal){
         html += treeCard('out', 'Where the money went — by category', flowChips);
         html += treeCard('in', 'Money in — by source');
 
-        // Old jewellery — ledger purchases (weight + rate known) and invoice exchanges (value only), combined
+        // Old jewellery bought through the ledger (weight + rate known). Returns are NOT included here.
         {
-            const ojL = entries.filter(e => e.type === 'expense' && !e.oj && e.categoryId === 'cat_oldjewellery');
-            const ojI = entries.filter(e => e.oj === 'out');
-            if (ojL.length || ojI.length) {
-                const lAmt = ojL.reduce((s, e) => s + (e.amount || 0), 0), iAmt = ojI.reduce((s, e) => s + (e.amount || 0), 0);
+            const ojL = entries.filter(e => e.type === 'expense' && e.categoryId === 'cat_oldjewellery' && !_rpIsReturns(e));
+            if (ojL.length) {
+                const lAmt = ojL.reduce((s, e) => s + (e.amount || 0), 0);
                 const mt = { Gold: { g: 0, v: 0 }, Silver: { g: 0, v: 0 } }; let noWt = 0;
                 ojL.forEach(e => { const o = e.oldJewellery; if (o && mt[o.metal] && o.weight > 0) { mt[o.metal].g += o.weight; mt[o.metal].v += e.amount || 0; } else noWt += e.amount || 0; });
                 const wl = ['Gold', 'Silver'].filter(m => mt[m].g > 0).map(m => `${m}: ${mt[m].g.toFixed(2)}g @ avg ₹${(mt[m].v / mt[m].g).toFixed(0)}/g`);
-                const row = (a, b, sub) => `<div style="padding:8px 0; border-top:1px solid var(--border);"><div style="display:flex; justify-content:space-between; font-size:13px; font-weight:700;"><span>${a}</span><span>${b}</span></div>${sub ? `<div style="font-size:11px; color:var(--text2); line-height:1.6; margin-top:2px;">${sub}</div>` : ''}</div>`;
-                html += `<div style="${_cardCss}"><div style="${_hdCss}">Old jewellery — combined</div>
-                    <div style="display:flex; justify-content:space-between; font-size:15px; font-weight:800; margin-bottom:4px;"><span>Total</span><span>${_rpFmt(lAmt + iAmt)}</span></div>
-                    ${row('Bought via ledger (cash/UPI paid)', _rpFmt(lAmt), (wl.join(' · ') || '—') + (noWt > 0 ? '<br>Without weight (older entries): ' + _rpFmt(noWt) : ''))}
-                    ${row('Taken on invoices (exchange)', _rpFmt(iAmt), ojI.length + ' bill' + (ojI.length === 1 ? '' : 's') + ' · value only, weight not tracked')}
-                    <div style="font-size:10.5px; color:var(--text2); margin-top:6px;">Ledger weights also count as metal bought in the Purchase tab and in Metal position below.</div></div>`;
+                html += `<div style="${_cardCss}"><div style="${_hdCss}">Old jewellery bought (ledger)</div>
+                    <div style="display:flex; justify-content:space-between; font-size:15px; font-weight:800; margin-bottom:4px;"><span>Total paid</span><span>${_rpFmt(lAmt)}</span></div>
+                    <div style="font-size:11px; color:var(--text2); line-height:1.6;">${wl.join(' · ') || '—'}${noWt > 0 ? '<br>Without weight (older entries): ' + _rpFmt(noWt) : ''}</div>
+                    <div style="font-size:10.5px; color:var(--text2); margin-top:6px;">These also count as metal bought in the Purchase tab and in Metal position below.</div></div>`;
             }
         }
 
