@@ -2214,7 +2214,102 @@ function computeCombinedAvgRate(metal){
             <div style="display:flex; justify-content:space-between; font-size:12px; padding:6px 0; border-top:1px solid var(--border);">
                 <b>${m}</b><span>Sold ${sold[m].toFixed(2)}g · Bought ${bought[m].toFixed(2)}g · Paid to suppliers ${paidG[m].toFixed(2)}g</span></div>`).join('') + '</div>';
 
+        // 8. Customer traffic — one invoice = one customer visit, timed by invoice generation (Track B)
+        html += _rpTrafficCard(from, to, days);
+
         body.innerHTML = html;
+    }
+
+    // Vertical bar chart (plain divs, same look as the rest of the Report)
+    function _rpBars(vals, labels, hi, color, hiColor, tipFn){
+        const max = Math.max(1, ...vals), H = 84;
+        const dense = vals.length > 16;
+        return `<div style="display:flex; align-items:flex-end; gap:${dense ? 2 : 4}px; height:${H + 16}px;">` + vals.map((v, i) => {
+            const h = v > 0 ? Math.max(3, Math.round(v / max * H)) : 0;
+            return `<div title="${_rpEsc(tipFn ? tipFn(i, v) : v)}" style="flex:1; min-width:0; display:flex; flex-direction:column; justify-content:flex-end; align-items:center; height:100%;">
+                ${v > 0 ? `<span style="font-size:${dense ? 8 : 10}px; font-weight:700; color:var(--text2); line-height:1; margin-bottom:2px;">${v % 1 ? v.toFixed(1) : v}</span>` : ''}
+                <div style="width:100%; height:${h}px; background:${i === hi ? hiColor : color}; border-radius:4px 4px 0 0;"></div></div>`;
+        }).join('') + `</div>
+        <div style="display:flex; gap:${dense ? 2 : 4}px; border-top:1px solid var(--border); padding-top:3px;">` + labels.map(l =>
+            `<div style="flex:1; min-width:0; text-align:center; font-size:${dense ? 8 : 10}px; color:var(--text2); overflow:hidden; white-space:nowrap;">${_rpEsc(l)}</div>`).join('') + '</div>';
+    }
+
+    let _rpTrafficTab = 'hour';
+    function rpTrafficTab(k){ _rpTrafficTab = k; renderReportTab(); }
+    function _rpTrafficCard(from, to, days){
+        const open = !!_rpOpen['traffic'];
+        const head = `<div onclick="rpToggle('traffic')" style="${_hdCss} cursor:pointer; user-select:none; display:flex; justify-content:space-between; ${open ? '' : 'margin-bottom:0;'}"><span>Customer traffic · invoices by time generated</span><span>${open ? '▾' : '▸'}</span></div>`;
+        if (!open) return `<div style="${_cardCss}">${head}</div>`;   // collapsed by default
+        const invs = _pmSalesSrc().filter(inv => {
+            if (inv.draft || !_rpTrackOk(inv.track)) return false;
+            const t = new Date(inv.timestamp); if (isNaN(t)) return false;
+            const d = _rpDate(t); return d >= from && d <= to;
+        });
+        if (!invs.length) return `<div style="${_cardCss}">${head}<div style="font-size:12px; color:var(--text2);">No Track B invoices in this range.</div></div>`;
+
+        const hours = new Array(24).fill(0), perDay = {};
+        invs.forEach(inv => {
+            const t = new Date(inv.timestamp);
+            hours[t.getHours()]++;
+            const d = _rpDate(t); perDay[d] = (perDay[d] || 0) + 1;
+        });
+        // Every calendar day in the range (including zero-sale days) — needed for fair weekday averages and the daily chart
+        const allDays = [];
+        for (let t = new Date(from + 'T12:00:00'); _rpDate(t) <= to && allDays.length < 3700; t = new Date(t.getFullYear(), t.getMonth(), t.getDate() + 1, 12)) allDays.push(_rpDate(t));
+        const wdTot = new Array(7).fill(0), wdN = new Array(7).fill(0);
+        allDays.forEach(d => { const w = new Date(d + 'T12:00:00').getDay(); wdN[w]++; wdTot[w] += perDay[d] || 0; });
+        const order = [1, 2, 3, 4, 5, 6, 0], wdName = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+        const wdAvg = order.map(w => wdN[w] ? wdTot[w] / wdN[w] : 0);
+        const hr12 = h => (h % 12 || 12) + (h < 12 ? 'a' : 'p'), hrFull = h => (h % 12 || 12) + ' ' + (h < 12 ? 'AM' : 'PM');
+
+        // Stats
+        const peakH = hours.indexOf(Math.max(...hours));
+        const peakWi = wdAvg.indexOf(Math.max(...wdAvg));
+        const peakD = Object.keys(perDay).sort((a, b) => perDay[b] - perDay[a] || a.localeCompare(b))[0];
+        const stat = (lbl, val, sub) => `<div style="background:#F7F7F5; border-radius:10px; padding:9px 11px;"><div style="font-size:11px; color:var(--text2);">${lbl}</div><div style="font-size:15px; font-weight:800;">${val}</div>${sub ? `<div style="font-size:10.5px; color:var(--text2);">${sub}</div>` : ''}</div>`;
+        const statsHtml = `<div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:14px;">
+                ${stat('Customers (invoices)', invs.length, (invs.length / allDays.length).toFixed(1) + ' per day')}
+                ${stat('Busiest hour', hrFull(peakH) + '–' + hrFull((peakH + 1) % 24), hours[peakH] + ' invoices')}
+                ${stat('Busiest weekday', wdName[order[peakWi]], wdAvg[peakWi].toFixed(1) + ' avg per day')}
+                ${stat('Busiest date', _rpShort(peakD), perDay[peakD] + ' invoices')}
+            </div>`;
+
+        // Charts — only one is shown at a time
+        const charts = {};
+        // A. Time of day (trim to the hours that actually have sales, with 1h padding)
+        const act = hours.map((v, i) => v > 0 ? i : -1).filter(i => i >= 0);
+        const h0 = Math.max(0, act[0] - 1), h1 = Math.min(23, act[act.length - 1] + 1);
+        const hIdx = []; for (let i = h0; i <= h1; i++) hIdx.push(i);
+        charts.hour = { label: 'Time of day', html: `<div style="font-size:12px; font-weight:700; margin-bottom:6px;">Invoices by time of day</div>` +
+            _rpBars(hIdx.map(i => hours[i]), hIdx.map(hr12), hIdx.indexOf(peakH), '#A5D6A7', '#2E7D32', (i, v) => hrFull(hIdx[i]) + ': ' + v + ' invoices') };
+        // B. Day of week (average invoices per that weekday)
+        charts.dow = { label: 'Day of week', html: `<div style="font-size:12px; font-weight:700; margin-bottom:6px;">By day of week <span style="font-weight:500; color:var(--text2);">(average per day)</span></div>` +
+            _rpBars(wdAvg.map(v => Math.round(v * 10) / 10), order.map(w => wdName[w]), peakWi, '#90CAF9', '#1565C0', (i, v) => wdName[order[i]] + ': ' + v + ' avg') };
+        // C. Over time (daily up to 62 days, otherwise monthly)
+        if (allDays.length > 1) {
+            let keys, vals, labels, title;
+            if (allDays.length <= 62) {
+                keys = allDays; vals = allDays.map(d => perDay[d] || 0);
+                const step = Math.ceil(allDays.length / 15);
+                labels = allDays.map((d, i) => (i % step === 0) ? String(+d.slice(8)) : '');
+                title = 'Day by day';
+            } else {
+                const mm = {}; allDays.forEach(d => { mm[d.slice(0, 7)] = mm[d.slice(0, 7)] || 0; });
+                Object.keys(perDay).forEach(d => { mm[d.slice(0, 7)] = (mm[d.slice(0, 7)] || 0) + perDay[d]; });
+                keys = Object.keys(mm).sort(); vals = keys.map(k => mm[k]);
+                labels = keys.map(k => new Date(k + '-01T12:00:00').toLocaleDateString('en-IN', { month: 'short' }));
+                title = 'Month by month';
+            }
+            charts.time = { label: title, html: `<div style="font-size:12px; font-weight:700; margin-bottom:6px;">${title}</div>` +
+                _rpBars(vals, labels, vals.indexOf(Math.max(...vals)), '#FFCC80', '#E65100', (i, v) => keys[i] + ': ' + v + ' invoices') };
+        }
+        const tabKeys = Object.keys(charts);
+        const cur = charts[_rpTrafficTab] ? _rpTrafficTab : 'hour';
+        const toggle = `<div style="display:flex; gap:6px; margin-bottom:14px;">` + tabKeys.map(k => {
+            const on = k === cur;
+            return `<button onclick="rpTrafficTab('${k}')" style="flex:1; margin:0; padding:8px 4px; font-size:12px; font-weight:700; border-radius:8px; box-shadow:none; border:1.5px solid ${on ? 'var(--gold)' : 'var(--border)'}; background:${on ? 'var(--gold)' : 'white'}; color:${on ? 'white' : 'var(--text)'};">${_rpEsc(charts[k].label)}</button>`;
+        }).join('') + '</div>';
+        return `<div style="${_cardCss}">${head}${toggle}${charts[cur].html}${statsHtml}<div style="font-size:10.5px; color:var(--text2); margin-top:10px;">One invoice counts as one customer visit (drafts excluded). Time is when the invoice was generated, in this device's local time. Darker bar = peak.</div></div>`;
     }
 
     function rpExportCsv(from, to){
