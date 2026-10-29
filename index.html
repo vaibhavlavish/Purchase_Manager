@@ -1128,11 +1128,11 @@ function computeCombinedAvgRate(metal){
 
     function _purchaseRow(p){
         const partyName = _pmPurWho(p);
-        const fromPos = p.source === 'pos-oj';
+        const fromPos = p.source === 'pos-oj' || p.source === 'pos';
         return `
             <div style="display:flex; justify-content:space-between; align-items:center; background:var(--surface); border-radius:var(--radius); padding:10px 14px; margin-bottom:8px; box-shadow:0 1px 6px rgba(0,0,0,.06); ${p.status === 'credit' ? 'border-left:3px solid #FB8C00;' : ''}">
                 <div style="font-size:12.5px;">
-                    <b>${partyName}</b> · ${p.creditType === 'amount' ? `${_pmRs(p.amount)} <span style="color:#FB8C00;">(credit — amount)</span>` : `${p.metal} · ${(p.weight || 0).toFixed(2)}g ${p.status === 'paid' ? `@ ₹${(p.rate || 0).toFixed(2)}/g` : (p.rate > 0 ? `@ ₹${p.rate.toFixed(2)}/g <span style="color:#FB8C00;">(credit — owes ${_pmRs(_pmFixedOwed(p))})</span>` : '<span style="color:#FB8C00;">(credit)</span>')}`}
+                    <b>${partyName}</b> · ${p.creditType === 'amount' ? `${_pmRs(p.amount)} <span style="color:#FB8C00;">(credit — amount)</span>` : `${p.metal} · ${(p.weight || 0).toFixed(2)}g ${p.status === 'paid' ? (p.rate > 0 ? `@ ₹${p.rate.toFixed(2)}/g` : '<span style="color:var(--text2);">(no rate — metal exchange)</span>') : (p.rate > 0 ? `@ ₹${p.rate.toFixed(2)}/g <span style="color:#FB8C00;">(credit — owes ${_pmRs(_pmFixedOwed(p))})</span>` : '<span style="color:#FB8C00;">(credit)</span>')}`}
                     <div style="font-size:10.5px; color:var(--text2);">${p.date || ''}${p.extra ? ' · +' + _pmRs(p.extra) + ' extra' : ''}${p.note ? ' · ' + p.note.replace(/</g, '&lt;') : ''}</div>
                 </div>
                 <div style="display:flex; align-items:center; gap:8px;">
@@ -1385,7 +1385,7 @@ function computeCombinedAvgRate(metal){
         const rateVal = parseFloat(g('purchase-rate').value) || 0;
         const fixed = isCredit && !isAmount && rateVal > 0;
         g('purchase-rate-field').style.display = isAmount ? 'none' : 'block';
-        g('purchase-rate-label').textContent = isCredit ? 'RATE (₹/gram) — OPTIONAL' : 'RATE PAID (₹/gram)';
+        g('purchase-rate-label').textContent = isCredit ? 'RATE (₹/gram) — OPTIONAL' : 'RATE PAID (₹/gram) — OPTIONAL (blank = metal exchange)';
         g('purchase-extra-field').style.display = (!isCredit || fixed) ? 'block' : 'none';
         g('purchase-credit-note').style.display = isCredit ? 'block' : 'none';
         const owedNow = (parseFloat(g('purchase-weight').value) || 0) * rateVal + (parseFloat(g('purchase-extra').value) || 0);
@@ -1532,7 +1532,7 @@ function computeCombinedAvgRate(metal){
         _pmApplyPartyMetal(existing);
         document.getElementById('purchase-weight').value = existing ? existing.weight : '';
         document.getElementById('purchase-date').value = existing ? existing.date : new Date().toISOString().slice(0, 10);
-        document.getElementById('purchase-rate').value = (existing && (existing.status === 'paid' || existing.rate > 0)) ? existing.rate : '';
+        document.getElementById('purchase-rate').value = (existing && existing.rate > 0) ? existing.rate : '';
         document.getElementById('purchase-extra').value = (existing && existing.extra) ? existing.extra : '';
         document.getElementById('purchase-note').value = existing ? (existing.note || '') : '';
         document.getElementById('purchase-amount').value = (existing && existing.creditType === 'amount') ? existing.amount : '';
@@ -1585,7 +1585,6 @@ function computeCombinedAvgRate(metal){
         if (isAmount) { if (amount <= 0) { showCustomAlert('Enter the amount on credit.'); return; } }
         else if (weight <= 0) { showCustomAlert('Enter weight purchased.'); return; }
         if (!dateVal) { showCustomAlert('Enter the date of purchase.'); return; }
-        if (status === 'paid' && !rate) { showCustomAlert('Enter the rate paid.'); return; }
 
         const createdAt = new Date(dateVal + 'T12:00:00.000Z').toISOString();
         const track = planId ? null : currentInvTrack;
@@ -1631,7 +1630,7 @@ function computeCombinedAvgRate(metal){
 
     async function deletePurchase(id){
         const _pu = purchases.find(p => p.id === id);
-        if (_pu && _pu.source === 'pos-oj') { showCustomAlert('This purchase comes from an Old Jewellery entry in the POS ledger. Delete that ledger entry in the POS instead.'); return; }
+        if (_pu && (_pu.source === 'pos-oj' || _pu.source === 'pos')) { showCustomAlert('This purchase comes from an entry in the POS ledger. Delete that ledger entry in the POS instead.'); return; }
         const _puTxt = _pu ? ` (${getPartyName(_pu.partyId)}${_pu.weight ? ' · ' + _pu.weight + 'g' : ''}${_pu.amount ? ' · ₹' + Math.round(_pu.amount).toLocaleString('en-IN') : ''})` : '';
         showCustomConfirm('Delete this purchase record' + _puTxt + '? This cannot be undone.', 'Delete', async () => {
             try {
@@ -3558,7 +3557,7 @@ function computeCombinedAvgRate(metal){
             metals[m] = {
                 fixedG, avgFixedRate: fixedG > 0 ? fixedVal / fixedG : 0,
                 has: mp.length > 0 || mpay.length > 0,
-                paidG, avgPaidRate: paidG > 0 ? paidVal / paidG : 0,
+                paidG, avgPaidRate: (() => { const rg = paidBuys.filter(p => p.rate > 0).reduce((a, p) => a + (p.weight || 0), 0); return rg > 0 ? paidVal / rg : 0; })(),
                 creditG: creditBuys.reduce((a, p) => a + (p.weight || 0), 0),
                 payG, avgPayRate: ratedG > 0 ? ratedVal / ratedG : 0,
                 owed: getPartyCreditBalance(pid, T, m)
