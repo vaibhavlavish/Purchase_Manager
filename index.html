@@ -1840,6 +1840,14 @@ function computeCombinedAvgRate(metal){
     function _rpShort(ds){ const d = new Date(ds + 'T12:00:00'); return d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short' }); }
     const _cardCss = 'background:var(--surface); border-radius:var(--radius); padding:14px; box-shadow:0 1px 6px rgba(0,0,0,.06); margin-bottom:12px;';
     const _hdCss = 'font-size:10px; font-weight:700; letter-spacing:.08em; color:var(--text2); text-transform:uppercase; margin-bottom:10px;';
+    // Bold card heading for the Report tab: tinted icon square + title (+ optional small subtitle)
+    function _rpHead(icon, title, accent, sub) {
+        return `<div style="display:flex; align-items:center; gap:10px; margin-bottom:12px;">
+            <div style="flex:0 0 auto; width:34px; height:34px; border-radius:10px; display:flex; align-items:center; justify-content:center; font-size:18px; background:${accent}26;">${icon}</div>
+            <div style="min-width:0;"><div style="font-size:14.5px; font-weight:800; color:var(--text); line-height:1.25;">${title}</div>${sub ? `<div style="font-size:11px; color:var(--text2); margin-top:1px;">${sub}</div>` : ''}</div>
+        </div>`;
+    }
+    const _rpCardAcc = acc => _cardCss + ' border-left:5px solid ' + acc + ';';
 
     // ── Donut chart helpers (Report) ──
     const _RP_PAL = ['#2E7D32', '#1565C0', '#E65100', '#8E24AA', '#00897B', '#F9A825', '#C62828', '#3949AB', '#6D4C41', '#7CB342'];
@@ -2059,8 +2067,8 @@ function computeCombinedAvgRate(metal){
         if (!entries.length) html += `<div style="${_cardCss} font-size:12px; color:var(--text2);">No cash book entries in this range.</div>`;
 
         // 1. Summary
-        html += `<div style="${_cardCss}">
-            <div style="${_hdCss}">Summary · ${_rpShort(from)} – ${_rpShort(to)} (${days} day${days > 1 ? 's' : ''})</div>
+        html += `<div style="${_rpCardAcc('#1565C0')}">
+            ${_rpHead('📊', 'Summary', '#1565C0', `${_rpShort(from)} – ${_rpShort(to)} · ${days} day${days > 1 ? 's' : ''}`)}
             <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:8px; text-align:center;">
                 <div><div style="font-size:17px; font-weight:800; color:#2E7D32;">${_rpFmt(T.in)}</div><div style="font-size:11px; color:var(--text2);">Money in</div></div>
                 <div><div style="font-size:17px; font-weight:800; color:#C62828;">${_rpFmt(T.out)}</div><div style="font-size:11px; color:var(--text2);">Money out</div></div>
@@ -2083,11 +2091,11 @@ function computeCombinedAvgRate(metal){
         // 3. Breakdown (out, then in) — donut by group; the legend rows expand into accounts and entries
         const treeCard = (dir, title, extra) => {
             const groups = Object.keys(tree[dir]).sort((a, b) => tree[dir][b].total - tree[dir][a].total);
-            if (!groups.length) return extra ? `<div style="${_cardCss}"><div style="${_hdCss}">${title}</div>${extra}</div>` : '';
+            if (!groups.length) return extra ? `<div style="${_rpCardAcc(dir === 'in' ? '#2E7D32' : '#C62828')}">${_rpHead(dir === 'in' ? '💰' : '💸', title, dir === 'in' ? '#2E7D32' : '#C62828')}${extra}</div>` : '';
             const total = dir === 'in' ? T.in : T.out;
             const col = {}; groups.forEach((g, i) => { col[g] = _RP_PAL[i % _RP_PAL.length]; });
             const slices = groups.map(g => ({ l: g, v: tree[dir][g].total, c: col[g] }));
-            let h = `<div style="${_cardCss}"><div style="${_hdCss}">${title}</div>
+            let h = `<div style="${_rpCardAcc(dir === 'in' ? '#2E7D32' : '#C62828')}">${_rpHead(dir === 'in' ? '💰' : '💸', title, dir === 'in' ? '#2E7D32' : '#C62828')}
                 <div style="display:flex; justify-content:center; margin-bottom:8px;">${_rpDonut(slices, _rpFmt(total), dir === 'in' ? 'MONEY IN' : 'MONEY OUT')}</div>${extra || ''}`;
             groups.forEach(g => {
                 const gk = 'g|' + dir + '|' + g, gOpen = !!_rpOpen[gk], G = tree[dir][g];
@@ -2121,7 +2129,7 @@ function computeCombinedAvgRate(metal){
                 const mt = { Gold: { g: 0, v: 0 }, Silver: { g: 0, v: 0 } }; let noWt = 0;
                 ojL.forEach(e => { const o = e.oldJewellery; if (o && mt[o.metal] && o.weight > 0) { mt[o.metal].g += o.weight; mt[o.metal].v += e.amount || 0; } else noWt += e.amount || 0; });
                 const wl = ['Gold', 'Silver'].filter(m => mt[m].g > 0).map(m => `${m}: ${mt[m].g.toFixed(2)}g @ avg ₹${(mt[m].v / mt[m].g).toFixed(0)}/g`);
-                html += `<div style="${_cardCss}"><div style="${_hdCss}">Old jewellery bought (ledger)</div>
+                html += `<div style="${_rpCardAcc('#C98A00')}">${_rpHead('💍', 'Old jewellery bought (ledger)', '#C98A00')}
                     <div style="display:flex; justify-content:space-between; font-size:15px; font-weight:800; margin-bottom:4px;"><span>Total paid</span><span>${_rpFmt(lAmt)}</span></div>
                     <div style="font-size:11px; color:var(--text2); line-height:1.6;">${wl.join(' · ') || '—'}${noWt > 0 ? '<br>Without weight (older entries): ' + _rpFmt(noWt) : ''}</div>
                     <div style="font-size:10.5px; color:var(--text2); margin-top:6px;">These also count as metal bought in the Purchase tab and in Metal position below.</div></div>`;
@@ -2143,7 +2151,7 @@ function computeCombinedAvgRate(metal){
         });
         const supIds = Object.keys(sup).sort((a, b) => sup[b].paid - sup[a].paid);
         if (supIds.length) {
-            let h = `<div style="${_cardCss}"><div style="${_hdCss}">Suppliers — paid in this period</div>`;
+            let h = `<div style="${_rpCardAcc('#6A1B9A')}">${_rpHead('🚚', 'Suppliers — paid in this period', '#6A1B9A')}`;
             supIds.forEach(id => {
                 const s = sup[id]; const lines = [];
                 ['Gold', 'Silver'].forEach(m => { if (s[m].g > 0) lines.push(`${m}: ${s[m].g.toFixed(2)}g @ avg ₹${(s[m].v / s[m].g).toFixed(0)}/g`); });
@@ -2173,7 +2181,7 @@ function computeCombinedAvgRate(metal){
         expAccts.sort((a, b) => b.total - a.total);
         if (expAccts.length) {
             const expTotal = expAccts.reduce((s, x) => s + x.total, 0);
-            html += `<div style="${_cardCss}"><div style="${_hdCss}">Expenses — top accounts</div>
+            html += `<div style="${_rpCardAcc('#EF6C00')}">${_rpHead('🧾', 'Expenses — top accounts', '#EF6C00')}
                 <div style="font-size:12px; color:var(--text2); margin-bottom:6px;">Total ${_rpFmt(expTotal)} · ${_rpFmt(expTotal / days)} per day</div>` +
                 expAccts.slice(0, 5).map(x => `<div style="display:flex; justify-content:space-between; font-size:13px; padding:5px 0; border-top:1px solid var(--border);"><span>${_rpEsc(x.name)} <span style="font-size:11px; color:var(--text2);">${_rpEsc(x.group)}</span></span><b>${_rpFmt(x.total)}</b></div>`).join('') + '</div>';
         }
@@ -2190,7 +2198,7 @@ function computeCombinedAvgRate(metal){
             });
             const keys = Object.keys(buckets).sort((a, b) => monthly ? a.localeCompare(b) : (a - b));
             const bmax = Math.max(1, ...keys.map(k => Math.max(buckets[k].in, buckets[k].out)));
-            html += `<div style="${_cardCss}"><div style="${_hdCss}">${monthly ? 'Monthly' : 'Weekly'} trend</div>` + keys.map(k => {
+            html += `<div style="${_rpCardAcc('#00838F')}">${_rpHead('📈', (monthly ? 'Monthly' : 'Weekly') + ' trend', '#00838F')}` + keys.map(k => {
                 const b = buckets[k];
                 const label = monthly ? b.label : 'Wk of ' + _rpShort(_rpDate(new Date(new Date(from + 'T12:00:00').getTime() + k * 7 * 86400000)));
                 return `<div style="margin-bottom:8px;"><div style="font-size:11px; color:var(--text2); margin-bottom:2px;">${label}</div>
@@ -2210,7 +2218,7 @@ function computeCombinedAvgRate(metal){
         const bought = { Gold: 0, Silver: 0 }, paidG = { Gold: 0, Silver: 0 };
         purchases.forEach(p => { if (_rpTrackOk(p.track) && inRange(p) && bought[p.metal] !== undefined) bought[p.metal] += p.weight || 0; });
         payments.forEach(p => { if (_rpTrackOk(p.track) && inRange(p) && paidG[p.metal] !== undefined) paidG[p.metal] += p.weight || 0; });
-        html += `<div style="${_cardCss}"><div style="${_hdCss}">Metal position (pure grams)</div>` + ['Gold', 'Silver'].map(m => `
+        html += `<div style="${_rpCardAcc('#8D6E00')}">${_rpHead('⚖️', 'Metal position (pure grams)', '#8D6E00')}` + ['Gold', 'Silver'].map(m => `
             <div style="display:flex; justify-content:space-between; font-size:12px; padding:6px 0; border-top:1px solid var(--border);">
                 <b>${m}</b><span>Sold ${sold[m].toFixed(2)}g · Bought ${bought[m].toFixed(2)}g · Paid to suppliers ${paidG[m].toFixed(2)}g</span></div>`).join('') + '</div>';
 
@@ -2238,14 +2246,14 @@ function computeCombinedAvgRate(metal){
     function rpTrafficTab(k){ _rpTrafficTab = k; renderReportTab(); }
     function _rpTrafficCard(from, to, days){
         const open = !!_rpOpen['traffic'];
-        const head = `<div onclick="rpToggle('traffic')" style="${_hdCss} cursor:pointer; user-select:none; display:flex; justify-content:space-between; ${open ? '' : 'margin-bottom:0;'}"><span>Customer traffic · invoices by time generated</span><span>${open ? '▾' : '▸'}</span></div>`;
-        if (!open) return `<div style="${_cardCss}">${head}</div>`;   // collapsed by default
+        const head = _sectionTile("rpToggle('traffic')", '🚶', 'Customer traffic', 'Invoices by hour, weekday and day · one invoice = one visit', open, '#5E35B1');
+        if (!open) return head;   // collapsed by default
         const invs = _pmSalesSrc().filter(inv => {
             if (inv.draft || !_rpTrackOk(inv.track)) return false;
             const t = new Date(inv.timestamp); if (isNaN(t)) return false;
             const d = _rpDate(t); return d >= from && d <= to;
         });
-        if (!invs.length) return `<div style="${_cardCss}">${head}<div style="font-size:12px; color:var(--text2);">No Track B invoices in this range.</div></div>`;
+        if (!invs.length) return `${head}<div style="${_cardCss} font-size:12px; color:var(--text2);">No Track B invoices in this range.</div>`;
 
         const hours = new Array(24).fill(0), perDay = {};
         invs.forEach(inv => {
@@ -2309,7 +2317,7 @@ function computeCombinedAvgRate(metal){
             const on = k === cur;
             return `<button onclick="rpTrafficTab('${k}')" style="flex:1; margin:0; padding:8px 4px; font-size:12px; font-weight:700; border-radius:8px; box-shadow:none; border:1.5px solid ${on ? 'var(--gold)' : 'var(--border)'}; background:${on ? 'var(--gold)' : 'white'}; color:${on ? 'white' : 'var(--text)'};">${_rpEsc(charts[k].label)}</button>`;
         }).join('') + '</div>';
-        return `<div style="${_cardCss}">${head}${toggle}${charts[cur].html}${statsHtml}<div style="font-size:10.5px; color:var(--text2); margin-top:10px;">One invoice counts as one customer visit (drafts excluded). Time is when the invoice was generated, in this device's local time. Darker bar = peak.</div></div>`;
+        return `${head}<div style="${_cardCss}">${toggle}${charts[cur].html}${statsHtml}<div style="font-size:10.5px; color:var(--text2); margin-top:10px;">One invoice counts as one customer visit (drafts excluded). Time is when the invoice was generated, in this device's local time. Darker bar = peak.</div></div>`;
     }
 
     function rpExportCsv(from, to){
@@ -2455,6 +2463,78 @@ function computeCombinedAvgRate(metal){
         _salesReportMetalCardExpanded = (_salesReportMetalCardExpanded === metal) ? null : metal;
         renderSalesReport();
     }
+    // ── Best sellers by Size & Design (by pieces sold) ──────────────────────────
+    let _bsExpanded = false, _bsMode = 'all', _bsMetal = 'All', _bsShowAll = false;
+    function _toggleBestSellers() { _bsExpanded = !_bsExpanded; renderSalesReport(); }
+    function _setBsMode(m) { _bsMode = m; _bsShowAll = false; renderSalesReport(); }
+    function _setBsMetal(m) { _bsMetal = m; _bsShowAll = false; renderSalesReport(); }
+    function _toggleBsAll() { _bsShowAll = !_bsShowAll; renderSalesReport(); }
+    // Tappable section tile (used for the collapsible Item-wise / Best-sellers sections)
+    function _sectionTile(onclickFn, icon, title, subtitle, isOpen, accent) {
+        return `
+            <div onclick="${onclickFn}" style="display:flex; align-items:center; gap:12px; margin:12px 0 8px; padding:12px 14px; cursor:pointer; user-select:none; -webkit-tap-highlight-color:transparent;
+                        background:var(--surface); border-radius:var(--radius); border-left:5px solid ${accent};
+                        box-shadow:${isOpen ? '0 3px 12px rgba(0,0,0,.14)' : '0 1px 6px rgba(0,0,0,.08)'};">
+                <div style="flex:0 0 auto; width:42px; height:42px; border-radius:12px; display:flex; align-items:center; justify-content:center; font-size:22px; background:${accent}26;">${icon}</div>
+                <div style="flex:1 1 auto; min-width:0;">
+                    <div style="font-size:15px; font-weight:800; color:var(--text); line-height:1.25;">${title}</div>
+                    <div style="font-size:11.5px; color:var(--text2); margin-top:2px; line-height:1.3;">${subtitle}</div>
+                </div>
+                <div style="flex:0 0 auto; padding:6px 12px; border-radius:16px; font-size:12px; font-weight:800; white-space:nowrap;
+                            background:${isOpen ? accent : accent + '26'}; color:${isOpen ? '#fff' : accent};">${isOpen ? 'Hide ▾' : 'Show ▸'}</div>
+            </div>`;
+    }
+    function _bsEsc(x) { return String(x == null ? '' : x).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+    function _bestSellersHtml(rows) {
+        const modes = [['all', 'Item + Size + Design'], ['size', 'Item + Size'], ['design', 'Item + Design'], ['sizeonly', 'Size only'], ['designonly', 'Design only']];
+        const chip = (active, label, fn) => `<span onclick="${fn}" style="cursor:pointer; user-select:none; padding:5px 10px; border-radius:14px; font-size:11px; font-weight:700; margin:0 6px 6px 0; display:inline-block; background:${active ? 'var(--text)' : 'var(--surface)'}; color:${active ? 'var(--surface)' : 'var(--text2)'}; box-shadow:0 1px 4px rgba(0,0,0,.08);">${label}</span>`;
+        const needSize = ['all', 'size', 'sizeonly'].includes(_bsMode);
+        const needDesign = ['all', 'design', 'designonly'].includes(_bsMode);
+        const withName = !['sizeonly', 'designonly'].includes(_bsMode);
+
+        const pool = rows.filter(r => _bsMetal === 'All' || r.metal === _bsMetal);
+        let missingPcs = 0, usedPcs = 0;
+        const agg = {};
+        pool.forEach(r => {
+            const size = String(r.size || '').trim(), design = String(r.design || '').trim();
+            // A piece counts only if it has the size/design this view is about
+            if ((needSize && !size) || (needDesign && !design)) { missingPcs += r.qty; return; }
+            usedPcs += r.qty;
+            const parts = [];
+            if (withName) parts.push(r.name);
+            if (needSize) parts.push('Size ' + size);
+            if (needDesign) parts.push(design);
+            const key = (withName ? r.metal + '|' : (_bsMetal === 'All' ? '' : '')) + parts.join(' · ').toLowerCase();
+            if (!agg[key]) agg[key] = { label: parts.join(' · '), metal: r.metal, qty: 0, weight: 0, value: 0 };
+            agg[key].qty += r.qty; agg[key].weight += r.weight; agg[key].value += r.value;
+        });
+        const list = Object.values(agg).sort((a, b) => (b.qty - a.qty) || (b.weight - a.weight) || (b.value - a.value));
+        const top = list.length ? list[0].qty : 1;
+        const LIMIT = 15;
+        const shown = _bsShowAll ? list : list.slice(0, LIMIT);
+        const icon = m => m === 'Gold' ? '🟡' : (m === 'Silver' ? '⚪' : '');
+
+        const body = shown.map((e, i) => `
+            <div style="background:var(--surface); border-radius:var(--radius); padding:8px 12px; margin-bottom:6px; box-shadow:0 1px 6px rgba(0,0,0,.06);">
+                <div style="display:flex; justify-content:space-between; align-items:center; gap:8px;">
+                    <div style="font-size:12.5px; font-weight:700;"><span style="color:var(--text2); font-weight:800; margin-right:6px;">${i + 1}</span>${withName ? icon(e.metal) + ' ' : ''}${_bsEsc(e.label)}</div>
+                    <div style="text-align:right; font-size:12px; color:var(--text2); white-space:nowrap;">${e.qty} pc${e.qty === 1 ? '' : 's'} · ${e.weight > 0 ? e.weight.toFixed(2) + 'g · ' : ''}₹${e.value.toFixed(0)}</div>
+                </div>
+                <div style="height:4px; border-radius:2px; background:var(--border); margin-top:6px;"><div style="height:4px; border-radius:2px; width:${Math.max(3, Math.round(e.qty / top * 100))}%; background:#D4A017;"></div></div>
+            </div>`).join('');
+
+        const note = missingPcs > 0
+            ? `<div style="font-size:10.5px; color:var(--text2); margin:2px 0 8px;">${missingPcs} pc${missingPcs === 1 ? '' : 's'} left out — no ${needSize && needDesign ? 'size/design' : (needSize ? 'size' : 'design')} recorded (loose, custom and repair items usually have none).</div>` : '';
+
+        return `
+            <div style="margin-top:6px;">
+                <div>${modes.map(([k, l]) => chip(_bsMode === k, l, `_setBsMode('${k}')`)).join('')}</div>
+                <div>${['All', 'Gold', 'Silver'].map(m => chip(_bsMetal === m, m, `_setBsMetal('${m}')`)).join('')}</div>
+                ${note}
+                ${list.length ? body : '<p class="note" style="text-align:center;">No size/design data in this range for this view.</p>'}
+                ${list.length > LIMIT ? `<div onclick="_toggleBsAll()" style="text-align:center; font-size:12px; font-weight:700; color:var(--text2); cursor:pointer; padding:6px;">${_bsShowAll ? '▴ Show top ' + LIMIT : '▾ Show all ' + list.length}</div>` : ''}
+            </div>`;
+    }
     function renderSalesReport() {
         const fromVal = document.getElementById('inv-rep-from').value;
         const toVal = document.getElementById('inv-rep-to').value;
@@ -2482,6 +2562,7 @@ function computeCombinedAvgRate(metal){
         const grams = { Gold: 0, Silver: 0 };
         const gramsByStamp = { Gold: {}, Silver: {} };
         const itemStats = {};
+        const bsRows = [];   // one entry per sold line, for the Size & Design best-sellers view
 
         inRange.forEach(inv => {
             const t = inv.totals || {};
@@ -2528,6 +2609,13 @@ function computeCombinedAvgRate(metal){
                     design: item.design || _pd.design || '',
                     price: invTaxableVal(item) * (1 + invTaxFrac) + (parseFloat(item.hm) || 0)
                 });
+                if (!isCustom) {
+                    bsRows.push({
+                        name: actualName, metal: metal || '', qty: (item.pc || 1), weight: (item.nlWt || 0),
+                        size: item.size || _pd.size || '', design: item.design || _pd.design || '',
+                        value: invTaxableVal(item) * (1 + invTaxFrac) + (parseFloat(item.hm) || 0)
+                    });
+                }
                 itemStats[key].qty += (item.pc || 1);
                 itemStats[key].weight += (item.nlWt || 0);
                 // Tax-inclusive: taxable value + GST, plus any H/M (hallmark) charge, which is untaxed
@@ -2650,11 +2738,10 @@ function computeCombinedAvgRate(metal){
                 ${card('Down Payments', '₹' + downPayments.toFixed(2))}
                 ${card('Installment Collections', '₹' + installmentPayments.toFixed(2))}
             </div>` : ''}
-            <div onclick="_toggleSalesReportItems()" style="display:flex; justify-content:space-between; align-items:center; margin:16px 0 8px; cursor:pointer; user-select:none;">
-                <span style="font-size:10px; font-weight:700; letter-spacing:.08em; color:var(--text2); text-transform:uppercase;">Item-wise Sales (by pieces sold · values incl. tax)</span>
-                <span style="font-size:11px; color:var(--text2);">${_salesReportItemsExpanded ? '▾ Hide' : '▸ Show'}</span>
-            </div>
+            ${_sectionTile('_toggleSalesReportItems()', '🧾', 'Item-wise Sales', 'Every item sold, ranked by pieces · values incl. tax', _salesReportItemsExpanded, '#C98A00')}
             ${_salesReportItemsExpanded ? (itemSectionsHtml || '<p class="note" style="text-align:center;">No items to break down.</p>') : ''}
+            ${_sectionTile('_toggleBestSellers()', '🏆', 'Best Sellers · Size &amp; Design', 'Which sizes and designs sell the most, by pieces', _bsExpanded, '#2E7D32')}
+            ${_bsExpanded ? _bestSellersHtml(bsRows) : ''}
         `;
     }
 
