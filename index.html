@@ -2641,7 +2641,7 @@ function computeCombinedAvgRate(metal){
         const old = (window._areaMgr || [])[i]; if (!old) return;
         const nn = (window.prompt('Correct spelling for “' + old + '” (use another area’s name to merge):', old) || '').trim().replace(/\s+/g, ' ');
         if (!nn || nn === old) return;
-        const tgt = areaAliases[areaNorm(nn)]; const finalName = (tgt && tgt.area) ? tgt.area : nn;
+        const tgt = areaAliases[areaNorm(nn)]; const finalName = (tgt && tgt.area && tgt.area !== old) ? tgt.area : nn;   // tgt === old itself (case/spacing-only fix) is a rename, not a merge
         const ts = Date.now(), upd = {};
         Object.keys(areaAliases).forEach(k => { if (areaAliases[k] && areaAliases[k].area === old) upd[k] = { area: finalName, ts }; });
         upd[areaNorm(finalName)] = { area: finalName, ts };
