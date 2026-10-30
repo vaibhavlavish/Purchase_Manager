@@ -674,6 +674,7 @@
     // ── Global state, synced from Firebase (read-only except where noted) ──
     let installmentPlans = [];
     let invoiceHistory = [];
+    let areaAliases = {};   // normalized spelling -> { area } — shared with the POS (root node 'areaAliases')
     let productData = {};
     let rates = { gold: {}, silver: {} };
     let baseCalcDefaults = {};
@@ -712,6 +713,12 @@
             pmMaybeImportSales();
             _pmRerenderSoon();
         }, err => console.error('[PmSales] read error', err));
+
+        // Area alias map (misspelling -> correct town/village). Written from here, also read by the POS.
+        window.dbOnValue(window.dbRef(window.firebaseDB, 'areaAliases'), snap => {
+            areaAliases = snap.val() || {};
+            _pmRerenderSoon();
+        }, err => console.error('[AreaAliases] read error', err));
 
         window.dbOnValue(window.dbRef(window.firebaseDB, 'cashbook'), snap => {
             cashbook = _objToArraySimple(snap.val());
@@ -2447,6 +2454,202 @@ function computeCombinedAvgRate(metal){
         if (te && !te.value) te.value = toStr;
         renderSalesReport();
     }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // AREA-WISE SALES — maps the free-text invoice address to a canonical
+    // town/village using the shared `areaAliases` node. Old invoices are
+    // never rewritten: the area is resolved at report time, so fixing a
+    // mapping instantly fixes every past report.
+    //   areaAliases/{normalizedSpelling} = { area: "Chikhli", ts }
+    // ═══════════════════════════════════════════════════════════════════
+    function areaNorm(s) { return String(s || '').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim(); }
+    function _areaEsc(x) { return String(x == null ? '' : x).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+    // → { empty:true } | { area:'Chikhli' } | { cand:'chikhlii' } (unmatched; cand = text to map)
+    function areaResolve(addr) {
+        const segs = String(addr || '').split(/[,\n]+/).map(areaNorm).filter(Boolean);
+        if (!segs.length) return { empty: true };
+        // 1) a whole comma-separated part matches (town is usually written last)
+        for (let i = segs.length - 1; i >= 0; i--) { const h = areaAliases[segs[i]]; if (h && h.area) return { area: h.area }; }
+        // 2) a single word inside a part matches
+        for (let i = segs.length - 1; i >= 0; i--) {
+            const w = segs[i].split(' ');
+            for (let j = w.length - 1; j >= 0; j--) { const h = areaAliases[w[j]]; if (h && h.area) return { area: h.area }; }
+        }
+        return { cand: segs[segs.length - 1] };
+    }
+    function _areaLev(a, b) {
+        if (a === b) return 0;
+        const m = a.length, n = b.length; if (!m) return n; if (!n) return m;
+        let prev = Array.from({ length: n + 1 }, (_, i) => i);
+        for (let i = 1; i <= m; i++) {
+            const cur = [i];
+            for (let j = 1; j <= n; j++) cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+            prev = cur;
+        }
+        return prev[n];
+    }
+    // Closest existing area for an unmatched spelling (suggestion only — never auto-assigned)
+    function areaSuggest(cand) {
+        const t = Math.max(1, Math.floor(cand.length * 0.34));
+        let best = null, bd = 99;
+        Object.keys(areaAliases).forEach(k => {
+            if (Math.abs(k.length - cand.length) > t) return;
+            const d = _areaLev(cand, k);
+            if (d < bd) { bd = d; best = areaAliases[k] && areaAliases[k].area; }
+        });
+        return (best && bd <= t) ? best : null;
+    }
+    function _areaCustKey(inv) {
+        const mob = String(inv.custMob || '').replace(/\D/g, '');
+        if (mob) return 'm:' + mob;
+        const nm = String(inv.custName || '').trim().toLowerCase();
+        return (nm && nm !== '—') ? 'n:' + nm : 'i:' + inv.id;
+    }
+    function _areaBuildStats(invs) {
+        const areas = {}, un = {};
+        const noAddr = { inv: 0, amt: 0, cust: new Set() };
+        const unTot = { inv: 0, amt: 0, cust: new Set() };
+        invs.forEach(inv => {
+            const amt = (inv.totals && inv.totals.rounded) || 0, ck = _areaCustKey(inv);
+            const r = areaResolve(inv.custAddr);
+            if (r.empty) { noAddr.inv++; noAddr.amt += amt; noAddr.cust.add(ck); }
+            else if (r.area) {
+                const a = areas[r.area] || (areas[r.area] = { name: r.area, inv: 0, amt: 0, cust: new Set() });
+                a.inv++; a.amt += amt; a.cust.add(ck);
+            } else {
+                const u = un[r.cand] || (un[r.cand] = { cand: r.cand, inv: 0, amt: 0, cust: new Set(), samples: [] });
+                u.inv++; u.amt += amt; u.cust.add(ck);
+                const raw = String(inv.custAddr || '').trim();
+                if (u.samples.length < 3 && !u.samples.includes(raw)) u.samples.push(raw);
+                unTot.inv++; unTot.amt += amt; unTot.cust.add(ck);
+            }
+        });
+        return { areas: Object.values(areas), queue: Object.values(un).sort((a, b) => (b.amt - a.amt) || (b.inv - a.inv)), noAddr, unTot };
+    }
+    let _areaSectionOpen = false, _areaSort = 'amt';
+    function _toggleAreaSection() { _areaSectionOpen = !_areaSectionOpen; renderSalesReport(); }
+    function _setAreaSort(m) { _areaSort = m; renderSalesReport(); }
+    function _areaSectionHtml(st) {
+        const accent = '#1565C0';
+        const nFix = st.queue.length;
+        const head = _sectionTile('_toggleAreaSection()', '📍', 'Area-wise Sales',
+            'Customers &amp; amount by town/village' + (nFix ? ' · <b style="color:#E65100;">' + nFix + ' address' + (nFix === 1 ? '' : 'es') + ' to fix</b>' : ''),
+            _areaSectionOpen, accent);
+        if (!_areaSectionOpen) return head;
+        const rows = st.areas.slice().sort((a, b) => _areaSort === 'cust'
+            ? ((b.cust.size - a.cust.size) || (b.amt - a.amt)) : ((b.amt - a.amt) || (b.cust.size - a.cust.size)));
+        const maxAmt = Math.max(1, ...rows.map(r => r.amt), st.unTot.amt);
+        const chip = (active, label, fn) => `<span onclick="${fn}" style="cursor:pointer; user-select:none; padding:5px 10px; border-radius:14px; font-size:11px; font-weight:700; margin:0 6px 6px 0; display:inline-block; background:${active ? 'var(--text)' : '#eee'}; color:${active ? '#fff' : 'var(--text)'};">${label}</span>`;
+        const row = (name, o, color, fn) => `
+            <div ${fn ? `onclick="${fn}"` : ''} style="background:var(--surface); border-radius:var(--radius); padding:10px 14px; margin-bottom:6px; box-shadow:0 1px 6px rgba(0,0,0,.06); ${fn ? 'cursor:pointer;' : ''}">
+                <div style="display:flex; justify-content:space-between; align-items:baseline; gap:8px;">
+                    <div style="font-size:13px; font-weight:700; color:${color || 'var(--text)'};">${name}</div>
+                    <div style="font-size:13px; font-weight:800;">₹${o.amt.toFixed(0)}</div>
+                </div>
+                <div style="font-size:11px; color:var(--text2); margin-top:2px;">${o.cust.size} customer${o.cust.size === 1 ? '' : 's'} · ${o.inv} invoice${o.inv === 1 ? '' : 's'}</div>
+                <div style="height:4px; border-radius:2px; background:#eee; margin-top:6px;"><div style="height:4px; border-radius:2px; width:${Math.max(2, o.amt / maxAmt * 100)}%; background:${color || '#1565C0'};"></div></div>
+            </div>`;
+        return `${head}
+            <div style="margin-bottom:8px;">
+                ${chip(_areaSort === 'amt', 'By amount', "_setAreaSort('amt')")}${chip(_areaSort === 'cust', 'By customers', "_setAreaSort('cust')")}
+                <span onclick="areaOpenManage()" style="cursor:pointer; padding:5px 10px; border-radius:14px; font-size:11px; font-weight:700; margin:0 6px 6px 0; display:inline-block; border:1.5px solid var(--border);">⚙ Manage areas</span>
+            </div>
+            ${rows.map(r => row(_areaEsc(r.name), r)).join('') || '<p class="note" style="text-align:center;">No addresses matched an area yet.</p>'}
+            ${st.unTot.inv ? row('❓ Unassigned — tap to fix', st.unTot, '#E65100', 'areaOpenQueue()') : ''}
+            ${st.noAddr.inv ? row('No address on invoice', st.noAddr, '#888') : ''}
+            <p class="note" style="margin:6px 2px 0;">Customers are counted by mobile number (name if no mobile). Original invoice addresses are never changed.</p>`;
+    }
+    async function _areaWrite(upd) {
+        try {
+            await window.dbUpdate(window.dbRef(window.firebaseDB, 'areaAliases'), upd);
+            return true;
+        } catch (e) { console.error('[AreaAliases] write failed', e); showCustomAlert('Could not save: ' + (e && e.message ? e.message : e)); return false; }
+    }
+    // Map a spelling (normalized key) to an area. Re-uses the existing canonical spelling if the name already exists.
+    async function areaMapTo(key, areaName) {
+        key = areaNorm(key);
+        let area = String(areaName || '').trim().replace(/\s+/g, ' ');
+        if (!key || !area) return false;
+        const existing = areaAliases[areaNorm(area)];
+        if (existing && existing.area) area = existing.area;
+        const ts = Date.now(), upd = {};
+        upd[key] = { area, ts };
+        const ck = areaNorm(area);
+        if (!areaAliases[ck]) upd[ck] = { area, ts };   // the correct spelling itself is a known alias too
+        if (!(await _areaWrite(upd))) return false;
+        Object.keys(upd).forEach(k => { areaAliases[k] = upd[k]; });
+        return true;
+    }
+    function _areaCanonList() { return Array.from(new Set(Object.values(areaAliases).map(a => a && a.area).filter(Boolean))).sort((a, b) => a.localeCompare(b)); }
+    function areaOpenQueue() {
+        const st = window._areaLastStats; if (!st) return;
+        window._areaQueue = st.queue;
+        const body = st.queue.length ? st.queue.map((u, i) => `
+            <div onclick="areaFixOpen(${i})" style="text-align:left; padding:10px 12px; margin-bottom:6px; border:1.5px solid var(--border); border-radius:10px; cursor:pointer;">
+                <div style="font-size:14px; font-weight:800;">${_areaEsc(u.cand)}</div>
+                <div style="font-size:11px; color:var(--text2);">${u.inv} invoice${u.inv === 1 ? '' : 's'} · ₹${u.amt.toFixed(0)}${u.samples.length ? ' · e.g. “' + _areaEsc(u.samples[0]) + '”' : ''}</div>
+            </div>`).join('') : '<p class="note">Nothing left to fix for this period 🎉</p>';
+        _pmSetModal('Fix addresses', '<div style="text-align:left;"><p class="note" style="margin:0 0 10px;">Sorted by amount. Tap one to link it to the correct area — it is remembered for every past and future bill.</p>' + body + '</div>',
+            _pmBtn('Close', 'closePmAlert()', 'ghost'));
+    }
+    function areaFixOpen(i) {
+        const u = (window._areaQueue || [])[i]; if (!u) return;
+        window._areaFixIdx = i;
+        const sug = areaSuggest(u.cand), list = _areaCanonList();
+        const sugBtn = sug ? `<button onclick="areaFixPick(${i}, ${JSON.stringify(sug).replace(/"/g, '&quot;')})" style="width:100%; padding:11px; margin-bottom:10px; border:none; border-radius:10px; background:#E8F0FE; color:#1565C0; font-weight:800;">Did you mean “${_areaEsc(sug)}”? Tap to link</button>` : '';
+        const sel = list.length ? `
+            <label style="font-size:11px; display:block; margin:6px 0 3px;">Link to an existing area</label>
+            <select id="area-fix-sel" style="margin:0 0 8px; width:100%;">${list.map(a => `<option value="${_areaEsc(a)}">${_areaEsc(a)}</option>`).join('')}</select>
+            <button onclick="areaFixPick(${i}, document.getElementById('area-fix-sel').value)" style="width:100%; padding:11px; margin-bottom:12px; border:none; border-radius:10px; background:var(--gold); color:#fff; font-weight:800;">Link</button>` : '';
+        _pmSetModal('Link “' + _areaEsc(u.cand) + '”',
+            `<div style="text-align:left;">
+                <div style="font-size:11.5px; color:var(--text2); margin-bottom:10px;">${u.inv} invoice${u.inv === 1 ? '' : 's'} · ₹${u.amt.toFixed(0)}${u.samples.length ? '<br>Written as: ' + u.samples.map(x => '“' + _areaEsc(x) + '”').join(', ') : ''}</div>
+                ${sugBtn}${sel}
+                <label style="font-size:11px; display:block; margin:6px 0 3px;">Or create a new area (correct spelling)</label>
+                <input type="text" id="area-fix-new" placeholder="e.g. Chikhli" style="margin:0 0 8px; width:100%;">
+                <button onclick="areaFixPick(${i}, document.getElementById('area-fix-new').value)" style="width:100%; padding:11px; border:none; border-radius:10px; background:#2E7D32; color:#fff; font-weight:800;">Create &amp; link</button>
+            </div>`,
+            _pmBtn('Back', 'areaOpenQueue()', 'ghost'));
+    }
+    async function areaFixPick(i, areaName) {
+        const u = (window._areaQueue || [])[i]; if (!u) return;
+        if (!String(areaName || '').trim()) { showCustomAlert('Type or choose an area first.'); return; }
+        if (await areaMapTo(u.cand, areaName)) { renderSalesReport(); areaOpenQueue(); }
+    }
+    function areaOpenManage() {
+        const by = {};
+        Object.keys(areaAliases).forEach(k => { const a = areaAliases[k] && areaAliases[k].area; if (a) (by[a] = by[a] || []).push(k); });
+        const names = Object.keys(by).sort((a, b) => a.localeCompare(b));
+        window._areaMgr = names;
+        const body = names.length ? names.map((n, i) => {
+            const own = areaNorm(n);
+            const chips = by[n].filter(k => k !== own).sort().map(k => `<span onclick="areaRemoveAlias('${encodeURIComponent(k)}')" style="display:inline-block; margin:3px 6px 0 0; padding:3px 9px; border-radius:12px; background:#eee; font-size:11.5px;">${_areaEsc(k)} ✕</span>`).join('');
+            return `<div style="padding:10px 12px; margin-bottom:6px; border:1.5px solid var(--border); border-radius:10px;">
+                <div style="display:flex; justify-content:space-between; align-items:center;"><b style="font-size:14px;">${_areaEsc(n)}</b>
+                <span onclick="areaRename(${i})" style="font-size:11px; font-weight:700; color:#1565C0; cursor:pointer;">Rename / merge</span></div>
+                <div>${chips || '<span style="font-size:11px; color:var(--text2);">no misspellings linked yet</span>'}</div></div>`;
+        }).join('') : '<p class="note">No areas yet. Fix an address from the Unassigned row to create the first one.</p>';
+        _pmSetModal('Areas', '<div style="text-align:left;"><p class="note" style="margin:0 0 10px;">Tap ✕ to unlink a wrong spelling. “Rename / merge” changes the correct spelling everywhere — typing the name of another area merges the two.</p>' + body + '</div>',
+            _pmBtn('Close', 'closePmAlert()', 'ghost'));
+    }
+    async function areaRemoveAlias(enc) {
+        const k = decodeURIComponent(enc);
+        if (!(await _areaWrite({ [k]: null }))) return;
+        delete areaAliases[k]; renderSalesReport(); areaOpenManage();
+    }
+    async function areaRename(i) {
+        const old = (window._areaMgr || [])[i]; if (!old) return;
+        const nn = (window.prompt('Correct spelling for “' + old + '” (use another area’s name to merge):', old) || '').trim().replace(/\s+/g, ' ');
+        if (!nn || nn === old) return;
+        const tgt = areaAliases[areaNorm(nn)]; const finalName = (tgt && tgt.area) ? tgt.area : nn;
+        const ts = Date.now(), upd = {};
+        Object.keys(areaAliases).forEach(k => { if (areaAliases[k] && areaAliases[k].area === old) upd[k] = { area: finalName, ts }; });
+        upd[areaNorm(finalName)] = { area: finalName, ts };
+        if (!(await _areaWrite(upd))) return;
+        Object.keys(upd).forEach(k => { areaAliases[k] = upd[k]; });
+        renderSalesReport(); areaOpenManage();
+    }
+
     let _salesReportItemsExpanded = false;
     function _toggleSalesReportItems(){
         _salesReportItemsExpanded = !_salesReportItemsExpanded;
@@ -2716,6 +2919,9 @@ function computeCombinedAvgRate(metal){
                 ${stampBlocks}`;
         }).join('');
 
+        const _areaStats = _areaBuildStats(inRange);
+        window._areaLastStats = _areaStats;
+
         resultsEl.innerHTML = `
             <div style="display:grid; grid-template-columns:1fr; gap:10px; margin-top:14px;">
                 ${card('Total Billed', '₹' + totalBilled.toFixed(2), inRange.length + ' invoice' + (inRange.length === 1 ? '' : 's'))}
@@ -2742,6 +2948,7 @@ function computeCombinedAvgRate(metal){
             ${_salesReportItemsExpanded ? (itemSectionsHtml || '<p class="note" style="text-align:center;">No items to break down.</p>') : ''}
             ${_sectionTile('_toggleBestSellers()', '🏆', 'Best Sellers · Size &amp; Design', 'Which sizes and designs sell the most, by pieces', _bsExpanded, '#2E7D32')}
             ${_bsExpanded ? _bestSellersHtml(bsRows) : ''}
+            ${_areaSectionHtml(_areaStats)}
         `;
     }
 
@@ -2751,12 +2958,16 @@ function computeCombinedAvgRate(metal){
     // jewelryData/*, acctAccounts, acctCategories, creditors, creditTxns,
     // creditorPhotos, installments, installmentIdPhotos or savingsPlans.
     // Ledger entries and bill history are intentionally NOT included.
+    // areaAliases (shared with the POS) IS included — it is small, and PM is its only editor.
     // ═══════════════════════════════════════════════════════════════════
     const PM_BK_NODES = ['parties', 'purchases', 'payments', 'pieceSupplies', 'manualOwedLog',
-                         'hedgeSalesStartDates', 'cashbook', 'pmSales', 'pmMeta'];
+                         'hedgeSalesStartDates', 'cashbook', 'pmSales', 'pmMeta', 'areaAliases'];
+    // Added after v1 backups already existed: older backups have no entry for these. Restoring such a
+    // backup must leave the live node alone (never delete it), so they are skipped when absent from the backup.
+    const PM_BK_OPTIONAL = ['areaAliases'];
     const PM_BK_LABEL = { parties: 'Suppliers', purchases: 'Purchases', payments: 'Supplier payments',
         pieceSupplies: 'Piece supplies', manualOwedLog: 'Manual owed log', hedgeSalesStartDates: 'Sales start dates',
-        cashbook: 'Cash book', pmSales: 'Sales copy', pmMeta: 'Meta' };
+        cashbook: 'Cash book', pmSales: 'Sales copy', pmMeta: 'Meta', areaAliases: 'Area aliases' };
     const PM_BK_VERSION = 1;
     const PM_BK_KEEP = 14;
     const PM_BK_CHUNK = 3 * 1024 * 1024;        // max bytes per cloud write while saving a snapshot
@@ -3029,6 +3240,7 @@ function computeCombinedAvgRate(metal){
         if (!o.data && o.counts && PM_BK_NODES.some(n => o.counts[n] > 0)) err.push('Backup data is missing.');
         Object.keys(data).forEach(k => { if (PM_BK_NODES.indexOf(k) < 0) err.push('Unexpected section "' + k + '" — this file contains data the Purchase Manager does not own.'); });
         if (o.counts) PM_BK_NODES.forEach(n => {
+            if (PM_BK_OPTIONAL.indexOf(n) >= 0 && o.counts[n] === undefined && data[n] === undefined) return;   // older backup, predates this section
             if (typeof o.counts[n] !== 'number') { err.push('Section "' + n + '" is missing from counts.'); return; }
             const v = data[n];
             if (v != null && typeof v !== 'object') err.push('Section "' + n + '" has the wrong shape.');
@@ -3080,7 +3292,7 @@ function computeCombinedAvgRate(metal){
     function _pmRestoreConfirm(v, src) {
         if (!v.ok) { _pmSetModal('Cannot restore', '<div style="text-align:left; font-size:13px; color:#C62828;">' + v.errors.map(e => '• ' + e).join('<br>') + '</div>', _pmBtn('Close', 'closePmAlert()', 'ghost')); return; }
         window._pmRestorePending = v;
-        const rows = PM_BK_NODES.map(n => '<div style="display:flex; justify-content:space-between; font-size:13px; padding:3px 0; border-top:1px solid #eee;"><span>' + PM_BK_LABEL[n] + '</span><b>' + v.counts[n] + '</b></div>').join('');
+        const rows = PM_BK_NODES.filter(n => typeof v.counts[n] === 'number').map(n => '<div style="display:flex; justify-content:space-between; font-size:13px; padding:3px 0; border-top:1px solid #eee;"><span>' + PM_BK_LABEL[n] + '</span><b>' + v.counts[n] + '</b></div>').join('');
         _pmSetModal('Confirm restore',
             '<div style="text-align:left;"><div style="font-size:13px; margin-bottom:6px;"><b>' + src + '</b><br>Backup date: <b>' + _pmFmtDate(v.createdAt) + '</b></div>' + rows +
             '<div style="font-size:12px; color:#C62828; margin:10px 0 6px;">This REPLACES all current Purchase Manager data with the above. A safety snapshot of the current data is saved first so you can undo. The POS is not touched.</div>' +
@@ -3100,13 +3312,14 @@ function computeCombinedAvgRate(metal){
         _pmBkBusy = true;
         const done = [];
         let cur = null, safetyId = null;
+        const nodes = PM_BK_NODES.filter(n => typeof v.counts[n] === 'number');   // older backups lack newer sections → leave those live nodes untouched
         try {
             // Plan the writes (whitelist only; empty sections become a delete)
             const upd = {};
-            PM_BK_NODES.forEach(n => { upd[n] = (v.data[n] == null || _pmCount(v.data[n]) === 0) ? null : v.data[n]; });
+            nodes.forEach(n => { upd[n] = (v.data[n] == null || _pmCount(v.data[n]) === 0) ? null : v.data[n]; });
             const sizes = {}; let total = 0;
-            PM_BK_NODES.forEach(n => { sizes[n] = upd[n] == null ? 0 : _pmBytes(upd[n]); total += sizes[n]; });
-            const tooBig = PM_BK_NODES.filter(n => sizes[n] > PM_RESTORE_NODE_MAX);
+            nodes.forEach(n => { sizes[n] = upd[n] == null ? 0 : _pmBytes(upd[n]); total += sizes[n]; });
+            const tooBig = nodes.filter(n => sizes[n] > PM_RESTORE_NODE_MAX);
             if (tooBig.length) throw new Error('Section "' + tooBig[0] + '" is ' + _pmMB(sizes[tooBig[0]]) + ' — too large to restore safely from the app. Nothing was changed.');
 
             _pmSetModal('Restoring…', '<div style="font-size:13px;">Saving a safety snapshot of the current data first. Do not close this page.</div>', '');
@@ -3117,16 +3330,16 @@ function computeCombinedAvgRate(metal){
             _pmSetModal('Restoring…', '<div style="font-size:13px;">Writing data. Do not close this page.</div>', '');
             if (total <= PM_RESTORE_ATOMIC_MAX) {
                 await window.dbUpdate(_pmRoot(), upd);               // one atomic multi-path write
-                PM_BK_NODES.forEach(n => done.push(n));
+                nodes.forEach(n => done.push(n));
             } else {
-                for (const n of PM_BK_NODES) {                       // safe order: suppliers first, meta last; each section is itself atomic
+                for (const n of nodes) {                             // safe order: suppliers first, meta last; each section is itself atomic
                     await window.dbUpdate(_pmRoot(), { [n]: upd[n] });
                     done.push(n);
                 }
             }
             // Confirm what landed
             const bad = [];
-            for (const n of PM_BK_NODES) { if ((await _pmShallowCount(n)) !== v.counts[n]) bad.push(n); }
+            for (const n of nodes) { if ((await _pmShallowCount(n)) !== v.counts[n]) bad.push(n); }
             _pmBkMsg('Restored from ' + _pmFmtDate(v.createdAt), 'ok');
             pmBkRefreshStatus();
             if (typeof _pmRerenderActiveTab === 'function') _pmRerenderActiveTab();
@@ -3137,9 +3350,9 @@ function computeCombinedAvgRate(metal){
             let msg = 'Restore failed: ' + (e.message || e) + '.';
             if (done.length || (cur && safetyId)) {
                 // Part-way failure on the multi-write path: put back what was replaced, using the data we just saved
-                if (done.length && done.length < PM_BK_NODES.length && cur) {
+                if (done.length && done.length < nodes.length && cur) {
                     try {
-                        const back = {}; PM_BK_NODES.forEach(n => { back[n] = cur[n] == null ? null : cur[n]; });
+                        const back = {}; nodes.forEach(n => { back[n] = cur[n] == null ? null : cur[n]; });
                         await window.dbUpdate(_pmRoot(), back);
                         msg += ' The previous data was put back automatically.';
                     } catch (e2) { msg += ' Automatic rollback also failed — restore snapshot <b>' + safetyId + '</b> from the Restore list to get your previous data back.'; }
