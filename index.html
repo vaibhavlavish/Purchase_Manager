@@ -1174,6 +1174,17 @@ function computeCombinedAvgRate(metal){
     }
 
     // ── Main Purchase tab render ──
+    // Hide/show the Purchase P&L, Installment plans and Per-piece supplies sections directly.
+    // The CSS :has() rule that did this is not re-evaluated by Safari when an inline style changes,
+    // so a section could stay hidden until the pane was re-laid-out (e.g. by switching tabs).
+    function _pmSecSync(){
+        const g = id => document.getElementById(id);
+        const set = (el, hide) => { const d = el && el.closest('details.pm-sec'); if (d) d.style.display = hide ? 'none' : ''; };
+        const pnl = g('hedge-pnl-card'), plans = g('hedge-plans-section'), piece = g('piece-supplies-card');
+        set(pnl, !pnl || pnl.style.display === 'none');
+        set(plans, !plans || plans.style.display === 'none');
+        set(piece, !piece || !piece.innerHTML.trim());
+    }
     function renderPurchaseTab(){
         renderPieceSupplies();
         const dateFieldEl = document.getElementById('hedge-sales-start-date');
@@ -1328,6 +1339,7 @@ function computeCombinedAvgRate(metal){
         }
         plansEl.innerHTML = html;
         document.getElementById('hedge-plans-section').style.display = evaluated.length ? '' : 'none';
+        _pmSecSync();
 
         // General purchases — track-scoped
         const salesTrackEl = document.getElementById('hedge-sales-track');
