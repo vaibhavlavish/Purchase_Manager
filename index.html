@@ -251,6 +251,7 @@
     <div id="pm-more-backdrop" onclick="pmMoreClose()"></div>
     <div id="pm-more-menu">
         <button onclick="pmMoreGo(pmSupOpen)">👥 Supplier list</button>
+        <button onclick="pmMoreGo(pmPurityOpen)">⚗ Purity % per stamp</button>
         <button onclick="pmMoreGo(() => location.reload())">🔄 Refresh</button>
         <div class="sep"></div>
         <button onclick="pmMoreGo(pmAvOpen)">🗄 Archive viewer</button>
@@ -678,6 +679,7 @@
     let productData = {};
     let rates = { gold: {}, silver: {} };
     let baseCalcDefaults = {};
+    let pmPurity = {};      // PM-only override: { gold: { '22K': 91.6 }, silver: { '925': 92.5 } } — pure-metal % per stamp
     let taxRateCfg = 3; // global tax % — only a fallback when an invoice has no taxable amount to derive its own rate from
     let parties = [];
     let purchases = [];
@@ -713,6 +715,12 @@
             pmMaybeImportSales();
             _pmRerenderSoon();
         }, err => console.error('[PmSales] read error', err));
+
+        // Per-stamp pure-metal % overrides (set from More › Purity % per stamp). PM-owned node.
+        window.dbOnValue(window.dbRef(window.firebaseDB, 'pmPurity'), snap => {
+            pmPurity = snap.val() || {};
+            _pmRerenderSoon();
+        }, err => console.error('[PmPurity] read error', err));
 
         // Area alias map (misspelling -> correct town/village). Written from here, also read by the POS.
         window.dbOnValue(window.dbRef(window.firebaseDB, 'areaAliases'), snap => {
@@ -797,9 +805,25 @@
         return s.charAt(0).toUpperCase() + s.slice(1).toLowerCase();
     }
 
+    // Firebase keys cannot contain . $ # [ ] / — encode them so stamps like "92.5" are safe
+    function _pmPurKey(stamp){ return String(stamp).replace(/[.$#\[\]\/%]/g, c => '%' + c.charCodeAt(0).toString(16).toUpperCase().padStart(2, '0')); }
+    function _pmPurityPct(metalKey, stamp){
+        const o = pmPurity && pmPurity[metalKey];
+        const v = o && o[_pmPurKey(stamp)];
+        return (typeof v === 'number' && v > 0 && v <= 100) ? v : 0;
+    }
+    // Purity ratio from the Update-rates prices only (what was used before overrides existed)
+    function _purityRatioFromRates(metalKey, stamp){
+        const pureRate = getPureRate(metalKey);
+        const stampRate = (rates[metalKey] && rates[metalKey][stamp]) || 0;
+        if (!pureRate || !stampRate) return 0;
+        return stampRate / pureRate;
+    }
     function _purityRatio(metal, stamp){
         if (!metal || !stamp) return 1;
         const metalKey = String(metal).toLowerCase();
+        const ov = _pmPurityPct(metalKey, stamp);
+        if (ov > 0) return ov / 100;               // your own % for this stamp wins over the rate-based estimate
         const pureRate = getPureRate(metalKey);
         const stampRate = (rates[metalKey] && rates[metalKey][stamp]) || 0;
         if (!pureRate || !stampRate) return 1;
@@ -2223,11 +2247,33 @@ function computeCombinedAvgRate(metal){
         });
         const inRange = r => { const d = r.date || (r.createdAt || '').slice(0, 10); return d >= from && d <= to; };
         const bought = { Gold: 0, Silver: 0 }, paidG = { Gold: 0, Silver: 0 };
-        purchases.forEach(p => { if (_rpTrackOk(p.track) && inRange(p) && bought[p.metal] !== undefined) bought[p.metal] += p.weight || 0; });
-        payments.forEach(p => { if (_rpTrackOk(p.track) && inRange(p) && paidG[p.metal] !== undefined) paidG[p.metal] += p.weight || 0; });
+        _pmPurchSrc().forEach(p => { if (_rpTrackOk(p.track) && inRange(p) && bought[p.metal] !== undefined) bought[p.metal] += p.weight || 0; });
+        _pmPaySrc().forEach(p => { if (_rpTrackOk(p.track) && inRange(p) && paidG[p.metal] !== undefined) paidG[p.metal] += p.weight || 0; });
         html += `<div style="${_rpCardAcc('#8D6E00')}">${_rpHead('⚖️', 'Metal position (pure grams)', '#8D6E00')}` + ['Gold', 'Silver'].map(m => `
             <div style="display:flex; justify-content:space-between; font-size:12px; padding:6px 0; border-top:1px solid var(--border);">
                 <b>${m}</b><span>Sold ${sold[m].toFixed(2)}g · Bought ${bought[m].toFixed(2)}g · Paid to suppliers ${paidG[m].toFixed(2)}g</span></div>`).join('') + '</div>';
+
+        // 7b. Purchases by month — only when the range spans several months (use the Archive viewer for a whole year)
+        if (from.slice(0, 7) !== to.slice(0, 7)) {
+            const byM = {};
+            _pmPurchSrc().forEach(p => {
+                if (!_rpTrackOk(p.track) || !inRange(p)) return;
+                const mk = (p.date || (p.createdAt || '').slice(0, 10)).slice(0, 7); if (!mk) return;
+                const o = byM[mk] || (byM[mk] = { Gold: 0, Silver: 0, amt: 0, n: 0 });
+                if (o[p.metal] !== undefined) o[p.metal] += p.weight || 0;
+                o.amt += p.creditType === 'amount' ? (p.amount || 0) : ((p.rate > 0) ? (p.weight || 0) * p.rate + (p.extra || 0) : 0);
+                o.n++;
+            });
+            const mks = Object.keys(byM).sort();
+            if (mks.length) {
+                const tot = { Gold: 0, Silver: 0, amt: 0, n: 0 };
+                const row = (label, o, bold) => `<div style="display:flex; justify-content:space-between; gap:8px; font-size:12px; padding:6px 0; border-top:1px solid var(--border); ${bold ? 'font-weight:800;' : ''}"><span style="min-width:62px;">${label}</span><span style="text-align:right;">Gold ${o.Gold.toFixed(2)}g · Silver ${o.Silver.toFixed(2)}g<br><span style="color:var(--text2); font-weight:600;">${o.n} entries · ${_rpFmt(o.amt)}</span></span></div>`;
+                html += `<div style="${_rpCardAcc('#455A64')}">${_rpHead('🛒', 'Purchases by month', '#455A64')}` + mks.map(mk => {
+                    const o = byM[mk]; tot.Gold += o.Gold; tot.Silver += o.Silver; tot.amt += o.amt; tot.n += o.n;
+                    return row(new Date(mk + '-01T12:00:00').toLocaleString('en-IN', { month: 'short', year: 'numeric' }), o);
+                }).join('') + row('Total', tot, true) + `<div class="note" style="margin-top:4px;">₹ counts purchases with a rate or an amount; metal-exchange and unpriced credit purchases show grams only.</div></div>`;
+            }
+        }
 
         // 8. Customer traffic — one invoice = one customer visit, timed by invoice generation (Track B)
         html += _rpTrafficCard(from, to, days);
@@ -2973,13 +3019,13 @@ function computeCombinedAvgRate(metal){
     // areaAliases (shared with the POS) IS included — it is small, and PM is its only editor.
     // ═══════════════════════════════════════════════════════════════════
     const PM_BK_NODES = ['parties', 'purchases', 'payments', 'pieceSupplies', 'manualOwedLog',
-                         'hedgeSalesStartDates', 'cashbook', 'pmSales', 'pmMeta', 'areaAliases'];
+                         'hedgeSalesStartDates', 'cashbook', 'pmSales', 'pmMeta', 'areaAliases', 'pmPurity'];
     // Added after v1 backups already existed: older backups have no entry for these. Restoring such a
     // backup must leave the live node alone (never delete it), so they are skipped when absent from the backup.
-    const PM_BK_OPTIONAL = ['areaAliases'];
+    const PM_BK_OPTIONAL = ['areaAliases', 'pmPurity'];
     const PM_BK_LABEL = { parties: 'Suppliers', purchases: 'Purchases', payments: 'Supplier payments',
         pieceSupplies: 'Piece supplies', manualOwedLog: 'Manual owed log', hedgeSalesStartDates: 'Sales start dates',
-        cashbook: 'Cash book', pmSales: 'Sales copy', pmMeta: 'Meta', areaAliases: 'Area aliases' };
+        cashbook: 'Cash book', pmSales: 'Sales copy', pmMeta: 'Meta', areaAliases: 'Area aliases', pmPurity: 'Purity %' };
     const PM_BK_VERSION = 1;
     const PM_BK_KEEP = 14;
     const PM_BK_CHUNK = 3 * 1024 * 1024;        // max bytes per cloud write while saving a snapshot
@@ -3384,6 +3430,12 @@ function computeCombinedAvgRate(metal){
     // ═══════════════════════════════════════════════════════════════════
     const PM_AR_VERSION = 1;
     const PM_AR_APP = 'suhag-pm-archive';
+    // Record kinds stored per archived month. Purchases / payments / pieceSupplies were added later:
+    // older months and older archive files simply have none of them (treated as 0).
+    const PM_AR_KINDS = ['sales', 'cashbook', 'purchases', 'payments', 'pieceSupplies'];
+    const PM_AR_LIVE = { sales: 'pmSales', cashbook: 'cashbook', purchases: 'purchases', payments: 'payments', pieceSupplies: 'pieceSupplies' };
+    const PM_AR_LABEL = { sales: 'Sales', cashbook: 'Cash book', purchases: 'Purchases', payments: 'Supplier payments', pieceSupplies: 'Piece bills' };
+    const _pmArCounts = (src, mt) => PM_AR_KINDS.map(k => PM_AR_LABEL[k] + ' ' + ((mt ? (src[k] || 0) : _pmCount(src[k])))).join(' · ');
     const PM_AR_CHUNK = PM_BK_CHUNK;                  // ~3 MB per cloud write (Firebase limit is 16 MB)
     const _pmMonthRe = /^\d{4}-(0[1-9]|1[0-2])$/;
     const _pmDayRe = /^\d{4}-\d{2}-\d{2}$/;
@@ -3421,7 +3473,11 @@ function computeCombinedAvgRate(metal){
     function _pmArSaleDay(inv) { const t = new Date(inv && inv.timestamp); return isNaN(t) ? '' : _rpDate(t); }
     function _pmArRecDay(kind, r) {
         if (kind === 'cashbook') return (r && typeof r.date === 'string' && _pmDayRe.test(r.date)) ? r.date : '';
-        return _pmArSaleDay(r);
+        if (kind === 'sales') return _pmArSaleDay(r);
+        // purchases / payments / pieceSupplies: same day rule the Report uses (date, else createdAt's date)
+        if (r && typeof r.date === 'string' && _pmDayRe.test(r.date)) return r.date;
+        const c = r && typeof r.createdAt === 'string' ? r.createdAt.slice(0, 10) : '';
+        return _pmDayRe.test(c) ? c : '';
     }
     function _pmMonthsBetween(from, to) {
         const out = []; let y = +from.slice(0, 4), m = +from.slice(5, 7); const ey = +to.slice(0, 4), em = +to.slice(5, 7);
@@ -3436,7 +3492,9 @@ function computeCombinedAvgRate(metal){
     async function _pmArReadMonth(m) {
         const v = (await window.dbGet(_pmRefAt('pmArchive/' + m))).val();
         const o = (v && typeof v === 'object') ? v : {};
-        return { sales: _pmAsObj(o.sales), cashbook: _pmAsObj(o.cashbook), meta: (o.meta && typeof o.meta === 'object') ? o.meta : null };
+        const out = { meta: (o.meta && typeof o.meta === 'object') ? o.meta : null };
+        PM_AR_KINDS.forEach(k => { out[k] = _pmAsObj(o[k]); });
+        return out;
     }
 
     // ── Archive a date range (replaces that range in the archive; live data is never changed) ──
@@ -3451,21 +3509,20 @@ function computeCombinedAvgRate(metal){
         const touched = [];                           // months where a cloud write has started
         try {
             _pmArMsg('Reading live data…');
-            const [sSnap, cSnap] = await Promise.all([window.dbGet(_pmRefAt('pmSales')), window.dbGet(_pmRefAt('cashbook'))]);
-            const liveS = _pmAsObj(sSnap.val()), liveC = _pmAsObj(cSnap.val());
+            const snaps = await Promise.all(PM_AR_KINDS.map(k => window.dbGet(_pmRefAt(PM_AR_LIVE[k]))));
+            const liveSrc = {}; PM_AR_KINDS.forEach((k, i) => { liveSrc[k] = _pmAsObj(snaps[i].val()); });
             const months = _pmMonthsBetween(from, to);
-            const live = {}; months.forEach(m => { live[m] = { sales: {}, cashbook: {} }; });
-            let skipped = 0, nLiveS = 0, nLiveC = 0;
-            const pick = (kind, src) => Object.keys(src).forEach(id => {
-                const r = src[id]; if (!r || typeof r !== 'object') return;
+            const live = {}; months.forEach(m => { live[m] = {}; PM_AR_KINDS.forEach(k => { live[m][k] = {}; }); });
+            let skipped = 0; const nLive = {}; PM_AR_KINDS.forEach(k => { nLive[k] = 0; });
+            PM_AR_KINDS.forEach(kind => Object.keys(liveSrc[kind]).forEach(id => {
+                const r = liveSrc[kind][id]; if (!r || typeof r !== 'object') return;
                 const d = _pmArRecDay(kind, r);
                 if (!d) { skipped++; return; }
                 if (d < from || d > to) return;
                 if (!id || /[.$#\[\]\/]/.test(id)) throw new Error('Record id "' + id + '" has characters Firebase does not allow in a key');
                 live[d.slice(0, 7)][kind][id] = r;
-                if (kind === 'sales') nLiveS++; else nLiveC++;
-            });
-            pick('sales', liveS); pick('cashbook', liveC);
+                nLive[kind]++;
+            }));
 
             _pmArMsg('Reading existing archive…');
             const exist = {};
@@ -3475,8 +3532,9 @@ function computeCombinedAvgRate(metal){
             const writes = [], stale = [], fin = {};
             months.forEach(m => {
                 const ex = exist[m], lv = live[m];
-                const fs = Object.assign({}, ex.sales), fc = Object.assign({}, ex.cashbook);
-                [['sales', ex.sales, lv.sales, fs], ['cashbook', ex.cashbook, lv.cashbook, fc]].forEach(([kind, exK, lvK, fK]) => {
+                fin[m] = {};
+                PM_AR_KINDS.forEach(kind => {
+                    const exK = ex[kind], lvK = lv[kind], fK = Object.assign({}, exK);
                     Object.keys(exK).forEach(id => {
                         const d = _pmArRecDay(kind, exK[id]);
                         if (d && d >= from && d <= to && !(id in lvK)) { stale.push('pmArchive/' + m + '/' + kind + '/' + id); delete fK[id]; }
@@ -3485,11 +3543,13 @@ function computeCombinedAvgRate(metal){
                         if (!(id in exK) || _pmStable(exK[id]) !== _pmStable(lvK[id])) writes.push(['pmArchive/' + m + '/' + kind + '/' + id, lvK[id]]);
                         fK[id] = lvK[id];
                     });
+                    fin[m][kind] = fK;
                 });
-                fin[m] = { sales: fs, cashbook: fc };
             });
-            const hadAnything = months.some(m => _pmCount(exist[m].sales) + _pmCount(exist[m].cashbook) > 0 || exist[m].meta);
-            if (!nLiveS && !nLiveC && !hadAnything) return res(true, 'empty', 'Nothing to archive between ' + from + ' and ' + to + '.', { sales: 0, cashbook: 0, removed: 0, months: [] });
+            const monthTotal = (o) => PM_AR_KINDS.reduce((a, k) => a + _pmCount(o[k]), 0);
+            const hadAnything = months.some(m => monthTotal(exist[m]) > 0 || exist[m].meta);
+            const nLiveAll = PM_AR_KINDS.reduce((a, k) => a + nLive[k], 0);
+            if (!nLiveAll && !hadAnything) return res(true, 'empty', 'Nothing to archive between ' + from + ' and ' + to + '.', { sales: 0, cashbook: 0, purchases: 0, payments: 0, pieceSupplies: 0, removed: 0, months: [] });
 
             // 1) new / changed records, chunked
             _pmArMsg('Writing ' + writes.length + ' record(s)…');
@@ -3512,9 +3572,11 @@ function computeCombinedAvgRate(metal){
             const iso = new Date().toISOString();
             const metaUpd = {}, expectMeta = {};
             months.forEach(m => {
-                const nS = _pmCount(fin[m].sales), nC = _pmCount(fin[m].cashbook);
-                if (nS + nC > 0) { metaUpd['pmArchive/' + m + '/meta'] = { archivedAt: iso, sales: nS, cashbook: nC }; expectMeta[m] = { sales: nS, cashbook: nC }; }
-                else if (_pmCount(exist[m].sales) + _pmCount(exist[m].cashbook) > 0 || exist[m].meta) metaUpd['pmArchive/' + m] = null;
+                if (monthTotal(fin[m]) > 0) {
+                    const mt = { archivedAt: iso }; PM_AR_KINDS.forEach(k => { mt[k] = _pmCount(fin[m][k]); });
+                    metaUpd['pmArchive/' + m + '/meta'] = mt; expectMeta[m] = mt;
+                }
+                else if (monthTotal(exist[m]) > 0 || exist[m].meta) metaUpd['pmArchive/' + m] = null;
             });
             Object.keys(metaUpd).forEach(p => { const mm = p.slice(10, 17); if (touched.indexOf(mm) < 0) touched.push(mm); });
             if (Object.keys(metaUpd).length) await window.dbUpdate(_pmRoot(), metaUpd);
@@ -3524,18 +3586,18 @@ function computeCombinedAvgRate(metal){
             const problems = [];
             for (const m of months) {
                 const back = await _pmArReadMonth(m);
-                ['sales', 'cashbook'].forEach(kind => {
+                PM_AR_KINDS.forEach(kind => {
                     const lvK = live[m][kind], bK = back[kind];
                     Object.keys(lvK).forEach(id => { if (!(id in bK)) problems.push(m + ' ' + kind + ' ' + id + ' missing'); else if (_pmStable(bK[id]) !== _pmStable(lvK[id])) problems.push(m + ' ' + kind + ' ' + id + ' differs'); });
                     Object.keys(bK).forEach(id => { const d = _pmArRecDay(kind, bK[id]); if (d && d >= from && d <= to && !(id in lvK)) problems.push(m + ' ' + kind + ' ' + id + ' stale record still present'); });
                 });
                 const em = expectMeta[m];
-                if (em) { if (!back.meta || back.meta.sales !== _pmCount(back.sales) || back.meta.cashbook !== _pmCount(back.cashbook) || back.meta.archivedAt !== iso) problems.push(m + ' meta does not match the stored records'); }
-                else if (_pmCount(back.sales) + _pmCount(back.cashbook) > 0 || back.meta) problems.push(m + ' should be empty but is not');
+                if (em) { if (!back.meta || back.meta.archivedAt !== iso || PM_AR_KINDS.some(k => (back.meta[k] || 0) !== _pmCount(back[k]))) problems.push(m + ' meta does not match the stored records'); }
+                else if (monthTotal(back) > 0 || back.meta) problems.push(m + ' should be empty but is not');
             }
             if (problems.length) throw new Error('verification found ' + problems.length + ' problem(s), e.g. ' + problems[0]);
-            const msg = 'Archived ' + from + ' → ' + to + ': ' + nLiveS + ' sales, ' + nLiveC + ' cash book entries (' + Object.keys(expectMeta).length + ' month(s)); ' + stale.length + ' stale archived record(s) removed. Verified ✓' + (skipped ? ' (' + skipped + ' record(s) without a valid date were not archived.)' : '');
-            const out = res(true, 'ok', msg, { sales: nLiveS, cashbook: nLiveC, removed: stale.length, months: Object.keys(expectMeta), skipped });
+            const msg = 'Archived ' + from + ' → ' + to + ': ' + nLive.sales + ' sales, ' + nLive.cashbook + ' cash book entries, ' + nLive.purchases + ' purchases, ' + nLive.payments + ' supplier payments, ' + nLive.pieceSupplies + ' piece bills (' + Object.keys(expectMeta).length + ' month(s)); ' + stale.length + ' stale archived record(s) removed. Verified ✓' + (skipped ? ' (' + skipped + ' record(s) without a valid date were not archived.)' : '');
+            const out = res(true, 'ok', msg, { sales: nLive.sales, cashbook: nLive.cashbook, purchases: nLive.purchases, payments: nLive.payments, pieceSupplies: nLive.pieceSupplies, removed: stale.length, months: Object.keys(expectMeta), skipped });
             if (document.getElementById('pm-ar-list') && document.getElementById('pm-ar-list').innerHTML) pmArRenderList();
             return out;
         } catch (e) {
@@ -3556,7 +3618,7 @@ function computeCombinedAvgRate(metal){
         const from = (document.getElementById('pm-ar-from') || {}).value, to = (document.getElementById('pm-ar-to') || {}).value;
         if (!window._writeAllowed) { showCustomAlert('This copy is read-only, so archive writes are skipped. Open the official app to archive.'); _pmArMsg('Archive: read-only copy — skipped', 'warn'); return; }
         if (!from || !to || from > to) { showCustomAlert('Pick a valid From and To date first (From must not be after To).'); return; }
-        const ok = await _pmAsk('Archive all <b>sales</b> and <b>cash book</b> records (both tracks, drafts included) dated <b>' + from + '</b> to <b>' + to + '</b>?<br><br>The archive for this date range will be <b>replaced</b> by what is live now. Archived records outside this range stay as they are. Live data is not changed or deleted.', 'Archive range', 'Archive');
+        const ok = await _pmAsk('Archive all <b>sales</b>, <b>cash book</b>, <b>purchases</b>, <b>supplier payments</b> and <b>piece bills</b> (both tracks, drafts included) dated <b>' + from + '</b> to <b>' + to + '</b>?<br><br>The archive for this date range will be <b>replaced</b> by what is live now. Archived records outside this range stay as they are. Live data is not changed or deleted.', 'Archive range', 'Archive');
         if (!ok) return;
         _pmSetModal('Archiving…', '<div style="font-size:13px;">Do not close this page.</div>', '');
         const r = await pmArchiveRange(from, to, { silent: true });
@@ -3575,7 +3637,7 @@ function computeCombinedAvgRate(metal){
             const btn = 'padding:7px 4px; font-size:11px; font-weight:700; border:1.5px solid var(--border); border-radius:8px; background:white; color:var(--text); flex:1;';
             el.innerHTML = months.map((m, i) => {
                 const mt = metas[i];
-                const line = mt ? 'Sales ' + (mt.sales || 0) + ' · Cash book ' + (mt.cashbook || 0) + '<br>Archived ' + _rpEsc(_pmFmtDate(mt.archivedAt)) : '<span style="color:#C62828;">⚠ Incomplete (no meta) — run Archive range again for this month</span>';
+                const line = mt ? _pmArCounts(mt, true) + '<br>Archived ' + _rpEsc(_pmFmtDate(mt.archivedAt)) : '<span style="color:#C62828;">⚠ Incomplete (no meta) — run Archive range again for this month</span>';
                 return '<div style="border:1.5px solid var(--border); border-radius:10px; padding:9px; margin-bottom:8px;"><div style="font-weight:700; font-size:13px;">' + m + '</div>' +
                     '<div class="note" style="margin:3px 0 7px;">' + line + '</div><div style="display:flex; gap:6px;">' +
                     '<button onclick="pmArDownload(\'' + m + '\')" style="' + btn + '">⬇ Download</button>' +
@@ -3589,13 +3651,14 @@ function computeCombinedAvgRate(metal){
             invToast('Preparing archive file…', 6000);
             const d = await _pmArReadMonth(m);
             const now = new Date();
-            const counts = { sales: _pmCount(d.sales), cashbook: _pmCount(d.cashbook) };
-            if (!counts.sales && !counts.cashbook) { showCustomAlert('This month has no archived records to download.'); return; }
-            const payload = { archiveVersion: PM_AR_VERSION, app: PM_AR_APP, month: m, createdAt: now.toISOString(), archivedAt: (d.meta && d.meta.archivedAt) || null, counts, sales: d.sales, cashbook: d.cashbook };
+            const counts = {}; PM_AR_KINDS.forEach(k => { counts[k] = _pmCount(d[k]); });
+            if (!PM_AR_KINDS.some(k => counts[k])) { showCustomAlert('This month has no archived records to download.'); return; }
+            const payload = { archiveVersion: PM_AR_VERSION, app: PM_AR_APP, month: m, createdAt: now.toISOString(), archivedAt: (d.meta && d.meta.archivedAt) || null, counts };
+            PM_AR_KINDS.forEach(k => { payload[k] = d[k]; });
             const json = JSON.stringify(payload);
             window._pmBkReady = { json, name: 'pm_archive_' + m + '_' + _pmStamp(now, true) + '.json' };
             _pmSetModal('Archive file ready',
-                '<div style="text-align:left; font-size:13px;"><b>' + m + '</b> · ' + _pmMB(new Blob([json]).size) + '<br><span style="font-size:11px; color:var(--text2);">Sales ' + counts.sales + ' · Cash book ' + counts.cashbook + '</span></div>',
+                '<div style="text-align:left; font-size:13px;"><b>' + m + '</b> · ' + _pmMB(new Blob([json]).size) + '<br><span style="font-size:11px; color:var(--text2);">' + _pmArCounts(counts, true) + '</span></div>',
                 _pmBtn('Close', 'closePmAlert()', 'ghost') + _pmBtn('Save file', 'pmArSaveReady(\'' + m + '\')'));
         } catch (e) { console.error(e); showCustomAlert('Could not prepare the archive file: ' + _rpEsc(e && e.message ? e.message : e)); }
     }
@@ -3608,7 +3671,7 @@ function computeCombinedAvgRate(metal){
         let mt = null;
         try { mt = (await window.dbGet(_pmRefAt('pmArchive/' + m + '/meta'))).val(); } catch (e) { /* counts are only informational */ }
         const warn = _pmArDownloaded[m] ? '' : '<br><br><b style="color:#C62828;">⚠ This month has not been downloaded in this session.</b> If you have no other copy, its archived records will be lost.';
-        const ok = await _pmAsk('Delete archived month <b>' + m + '</b> from the cloud' + (mt ? ' (' + (mt.sales || 0) + ' sales, ' + (mt.cashbook || 0) + ' cash book entries)' : '') + '?<br><br>Live sales and cash book are <b>not</b> touched. Archives <b>cannot be restored into live data</b> — this app has no restore for archives.' + warn, 'Delete archived month', 'Delete');
+        const ok = await _pmAsk('Delete archived month <b>' + m + '</b> from the cloud' + (mt ? ' (' + _pmArCounts(mt, true) + ')' : '') + '?<br><br>Live data is <b>not</b> touched. Archives <b>cannot be restored into live data</b> — this app has no restore for archives.' + warn, 'Delete archived month', 'Delete');
         if (!ok) { pmArManageOpen(); return; }
         _pmArBusy = true;
         try {
@@ -3683,11 +3746,11 @@ function computeCombinedAvgRate(metal){
     // ── Viewer: accessors used ONLY by the report screens (live arrays are never overwritten) ──
     function _pmAvMerged() {
         const c = _pmAvCache;
-        if (c && c.s === invoiceHistory && c.c === cashbook && c.v === _pmAv.ver) return c;
-        const ms = new Map(), mc = new Map();
+        if (c && c.s === invoiceHistory && c.c === cashbook && c.p === purchases && c.y === payments && c.ps === pieceSupplies && c.v === _pmAv.ver) return c;
+        const maps = {}; PM_AR_KINDS.forEach(k => { maps[k] = new Map(); });
         const put = (map, src) => { Object.keys(src || {}).forEach(k => map.set(k, src[k])); };
-        _pmAv.files.forEach(f => { put(ms, f.sales); put(mc, f.cashbook); });                                   // lowest priority
-        Object.keys(_pmAv.cloud).sort().forEach(m => { put(ms, _pmAv.cloud[m].sales); put(mc, _pmAv.cloud[m].cashbook); });
+        _pmAv.files.forEach(f => PM_AR_KINDS.forEach(k => put(maps[k], f[k])));                                   // lowest priority
+        Object.keys(_pmAv.cloud).sort().forEach(m => PM_AR_KINDS.forEach(k => put(maps[k], _pmAv.cloud[m][k])));
         // Live wins over archive: same id replaces the archived copy. Live records with no id are matched by content,
         // so a record that is both live and archived is never counted twice.
         const putLive = (map, arr) => {
@@ -3699,12 +3762,17 @@ function computeCombinedAvgRate(metal){
                 noId.forEach((r, i) => map.set('__live' + i, r));
             }
         };
-        putLive(ms, invoiceHistory); putLive(mc, cashbook);
-        _pmAvCache = { s: invoiceHistory, c: cashbook, v: _pmAv.ver, sales: Array.from(ms.values()), cash: Array.from(mc.values()) };
+        putLive(maps.sales, invoiceHistory); putLive(maps.cashbook, cashbook);
+        putLive(maps.purchases, purchases); putLive(maps.payments, payments); putLive(maps.pieceSupplies, pieceSupplies);
+        _pmAvCache = { s: invoiceHistory, c: cashbook, p: purchases, y: payments, ps: pieceSupplies, v: _pmAv.ver,
+            sales: Array.from(maps.sales.values()), cash: Array.from(maps.cashbook.values()),
+            purch: Array.from(maps.purchases.values()), pay: Array.from(maps.payments.values()), piece: Array.from(maps.pieceSupplies.values()) };
         return _pmAvCache;
     }
     function _pmSalesSrc() { return _pmAv.active ? _pmAvMerged().sales : invoiceHistory; }
     function _pmCashSrc() { return _pmAv.active ? _pmAvMerged().cash : cashbook; }
+    function _pmPurchSrc() { return _pmAv.active ? _pmAvMerged().purch : purchases; }
+    function _pmPaySrc() { return _pmAv.active ? _pmAvMerged().pay : payments; }
 
     function _pmAvApplyUi() {
         const on = _pmAv.active, g = id => document.getElementById(id);
@@ -3801,7 +3869,7 @@ function computeCombinedAvgRate(metal){
             if (!months.length) { el.textContent = 'No archived months in the cloud yet — live data will still be shown.'; return; }
             const metas = await Promise.all(months.map(m => window.dbGet(_pmRefAt('pmArchive/' + m + '/meta')).then(s => s.val())));
             const el2 = document.getElementById('pm-av-months'); if (!el2) return;
-            el2.innerHTML = months.map((m, i) => '<div style="display:flex; justify-content:space-between; font-size:12px; padding:3px 0; border-top:1px solid #eee;"><b>' + m + '</b><span>' + (metas[i] ? 'Sales ' + (metas[i].sales || 0) + ' · Cash ' + (metas[i].cashbook || 0) : '⚠ incomplete') + '</span></div>').join('');
+            el2.innerHTML = months.map((m, i) => '<div style="display:flex; justify-content:space-between; font-size:12px; padding:3px 0; border-top:1px solid #eee;"><b>' + m + '</b><span>' + (metas[i] ? 'Sales ' + (metas[i].sales || 0) + ' · Cash ' + (metas[i].cashbook || 0) + ' · Purch ' + (metas[i].purchases || 0) : '⚠ incomplete') + '</span></div>').join('');
         } catch (e) { const el = document.getElementById('pm-av-months'); if (el) { el.textContent = 'Could not list archived months: ' + (e && e.message ? e.message : e); el.style.color = '#C62828'; } }
     }
     async function pmAvLoad() {
@@ -3814,7 +3882,7 @@ function computeCombinedAvgRate(metal){
             const have = (j && typeof j === 'object') ? Object.keys(j).filter(k => _pmMonthRe.test(k)) : [];
             const want = _pmMonthsBetween(from, to).filter(m => have.indexOf(m) >= 0);
             const cloud = {};
-            for (const m of want) { const d = await _pmArReadMonth(m); cloud[m] = { sales: d.sales, cashbook: d.cashbook, meta: d.meta }; }
+            for (const m of want) { const d = await _pmArReadMonth(m); cloud[m] = { sales: d.sales, cashbook: d.cashbook, purchases: d.purchases, payments: d.payments, pieceSupplies: d.pieceSupplies, meta: d.meta }; }
             _pmAv.cloud = cloud; _pmAv.from = from; _pmAv.to = to;
             _pmAvSetDates(from, to);
             closePmAlert();
@@ -3831,15 +3899,17 @@ function computeCombinedAvgRate(metal){
         if (o.app !== PM_AR_APP) err.push('not a Suhag Purchase Manager archive');
         if (typeof o.month !== 'string' || !_pmMonthRe.test(o.month)) err.push('month is missing or not YYYY-MM');
         if (!o.counts || typeof o.counts.sales !== 'number' || typeof o.counts.cashbook !== 'number') err.push('counts are missing');
-        ['sales', 'cashbook'].forEach(k => {
+        PM_AR_KINDS.forEach(k => {
             const v = o[k];
             if (v == null) return;
             if (typeof v !== 'object' || Array.isArray(v)) err.push(k + ' has the wrong shape');
             else if (Object.keys(v).some(id => !v[id] || typeof v[id] !== 'object' || Array.isArray(v[id]))) err.push(k + ' contains an invalid record');
         });
-        if (!err.length) ['sales', 'cashbook'].forEach(k => { if (_pmCount(o[k]) !== o.counts[k]) err.push(k + ' has ' + _pmCount(o[k]) + ' records but the file says ' + o.counts[k]); });
+        if (!err.length) PM_AR_KINDS.forEach(k => { const want = typeof o.counts[k] === 'number' ? o.counts[k] : 0; if (_pmCount(o[k]) !== want) err.push(k + ' has ' + _pmCount(o[k]) + ' records but the file says ' + want); });
         if (err.length) return { ok: false, errors: err };
-        return { ok: true, month: o.month, sales: o.sales || {}, cashbook: o.cashbook || {}, counts: o.counts };
+        const okRes = { ok: true, month: o.month, counts: o.counts };
+        PM_AR_KINDS.forEach(k => { okRes[k] = o[k] || {}; });
+        return okRes;
     }
     function pmAvFilesChosen(inp) {
         const files = Array.from(inp.files || []); if (!files.length) return;
@@ -3855,7 +3925,7 @@ function computeCombinedAvgRate(metal){
                 let o; try { o = JSON.parse(it.text); } catch (e) { errs.push(it.name + ': not valid JSON'); return; }
                 const v = _pmAvValidateFile(o);
                 if (!v.ok) { errs.push(it.name + ': ' + v.errors.join('; ')); return; }
-                _pmAv.files.push({ id: _pmAv.nextId++, name: it.name, month: v.month, sales: v.sales, cashbook: v.cashbook, counts: v.counts });
+                _pmAv.files.push({ id: _pmAv.nextId++, name: it.name, month: v.month, sales: v.sales, cashbook: v.cashbook, purchases: v.purchases, payments: v.payments, pieceSupplies: v.pieceSupplies, counts: v.counts });
                 added++;
             });
             inp.value = '';
@@ -3868,6 +3938,71 @@ function computeCombinedAvgRate(metal){
             }
             if (errs.length) showCustomAlert('<div style="text-align:left; font-size:13px; color:#C62828;">' + errs.map(e => '• ' + _rpEsc(e)).join('<br>') + '</div>', added ? 'Some files were rejected' : 'Cannot open file');
         });
+    }
+
+
+    // ═══════════════════════════════════════════════════════════════════
+    // PURITY % PER STAMP (More menu, Track B)
+    // Pure-metal grams are normally estimated from the stamp price in Update rates
+    // (stamp rate ÷ pure rate). Here you can fix the exact % for any stamp instead.
+    // Stored at pmPurity/{gold|silver}/{stamp}; blank = keep using the rate-based estimate.
+    // ═══════════════════════════════════════════════════════════════════
+    function _pmPurityStamps() {
+        const out = { gold: new Set(), silver: new Set() };
+        ['gold', 'silver'].forEach(m => {
+            Object.keys(rates[m] || {}).forEach(k => out[m].add(k));
+            const o = pmPurity && pmPurity[m];
+            if (o) Object.keys(o).forEach(k => out[m].add(k.replace(/%([0-9A-F]{2})/g, (_, h) => String.fromCharCode(parseInt(h, 16)))));
+        });
+        Object.keys(productData || {}).forEach(b => {
+            const d = productData[b]; if (!d || !d.stamp) return;
+            const m = String(d.metal || '').toLowerCase(); if (out[m]) out[m].add(String(d.stamp));
+        });
+        return { gold: Array.from(out.gold).sort(), silver: Array.from(out.silver).sort() };
+    }
+    function pmPurityOpen() {
+        if (_pmAvBlocked()) return;
+        const st = _pmPurityStamps(); window._pmPurRows = [];
+        const inp = 'margin:0; width:78px; padding:7px 8px; border:1.5px solid var(--border); border-radius:8px; font-size:13px; text-align:right;';
+        let h = '<div style="text-align:left; font-size:13px;"><p class="note" style="margin:0 0 8px;">Set the exact pure-metal % for a stamp (e.g. 22K = 91.6). Leave blank to keep using the estimate from Update rates. Applies to every pure-gram figure in this app, including past data.</p><div style="max-height:52vh; overflow:auto;">';
+        ['gold', 'silver'].forEach(m => {
+            if (!st[m].length) return;
+            h += '<div style="font-size:11px; font-weight:700; letter-spacing:.06em; color:var(--text2); text-transform:uppercase; margin:8px 0 4px;">' + (m === 'gold' ? 'Gold' : 'Silver') + '</div>';
+            st[m].forEach(stamp => {
+                const i = window._pmPurRows.push({ metal: m, stamp }) - 1;
+                const r = _purityRatioFromRates(m, stamp);
+                const auto = r > 0 ? (r * 100).toFixed(2).replace(/\.?0+$/, '') + '%' : 'no rate';
+                const cur = _pmPurityPct(m, stamp);
+                h += '<div style="display:flex; align-items:center; gap:8px; padding:5px 0; border-top:1px solid #eee;"><b style="flex:1;">' + _rpEsc(stamp) + '</b><span style="font-size:11px; color:var(--text2);">now ' + _rpEsc(auto) + '</span>' +
+                    '<input type="number" id="pm-pur-' + i + '" step="0.01" min="0" max="100" inputmode="decimal" placeholder="auto" value="' + (cur || '') + '" style="' + inp + '"><span>%</span></div>';
+            });
+        });
+        if (!window._pmPurRows.length) h += '<div class="note">No stamps found yet — add rates in the POS first.</div>';
+        h += '</div><div id="pm-pur-msg" class="note" style="min-height:14px; margin-top:6px; color:#C62828;"></div></div>';
+        _pmSetModal('Purity % per stamp', h, _pmPopWrap(_pmBtn('Save', 'pmPuritySave()') + _pmBtn('Close', 'closePmAlert()', 'ghost')));
+    }
+    async function pmPuritySave() {
+        const msg = t => { const el = document.getElementById('pm-pur-msg'); if (el) el.textContent = t; };
+        if (_pmAvBlocked()) return;
+        if (!window._writeAllowed) { msg('This copy is read-only, so saving is skipped. Open the official app to save.'); return; }
+        const next = {};
+        for (let i = 0; i < (window._pmPurRows || []).length; i++) {
+            const el = document.getElementById('pm-pur-' + i); if (!el) continue;
+            const raw = String(el.value).trim(); if (raw === '') continue;
+            const v = parseFloat(raw);
+            const row = window._pmPurRows[i];
+            if (!(v > 0 && v <= 100)) { msg('"' + row.stamp + '": enter a % between 0 and 100, or leave it blank.'); return; }
+            (next[row.metal] = next[row.metal] || {})[_pmPurKey(row.stamp)] = v;
+        }
+        // keep overrides for stamps that are no longer listed (so nothing is silently dropped)
+        const listed = new Set((window._pmPurRows || []).map(r => r.metal + '|' + _pmPurKey(r.stamp)));
+        ['gold', 'silver'].forEach(m => { const o = pmPurity && pmPurity[m]; if (o) Object.keys(o).forEach(k => { if (!listed.has(m + '|' + k)) (next[m] = next[m] || {})[k] = o[k]; }); });
+        try {
+            await window.dbUpdate(_pmRoot(), { pmPurity: Object.keys(next).length ? next : null });
+            pmPurity = next;
+            closePmAlert(); _pmRerenderActiveTab();
+            invToast('✅ Purity % saved');
+        } catch (e) { console.error('[PM purity] save failed', e); msg('Could not save: ' + (e && e.message ? e.message : e)); }
     }
 
     // ═══════════════════════════════════════════════════════════════════
@@ -4079,7 +4214,7 @@ function computeCombinedAvgRate(metal){
     // Archive data (copy a date range into the cloud archive)
     function pmArchiveMenuOpen() {
         _pmSetModal('Archive data',
-            '<div style="text-align:left; font-size:13px;"><p class="note" style="margin:0 0 10px;">Copies sales and cash book records for a date range into a separate cloud archive for analytics. Live data is never deleted by this. Purchases, suppliers and payments are not archived.</p>' +
+            '<div style="text-align:left; font-size:13px;"><p class="note" style="margin:0 0 10px;">Copies sales, cash book, purchases, supplier payments and piece bills for a date range into a separate cloud archive for analytics. Live data is never deleted by this. The supplier list itself is not archived.</p>' +
             '<div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:8px;">' +
             '<div><label style="font-size:11px; display:block; margin-bottom:3px;">From</label><input type="date" id="pm-ar-from" style="margin:0; width:100%;"></div>' +
             '<div><label style="font-size:11px; display:block; margin-bottom:3px;">To</label><input type="date" id="pm-ar-to" style="margin:0; width:100%;"></div></div>' +
