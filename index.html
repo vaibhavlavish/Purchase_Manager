@@ -2602,7 +2602,7 @@ function computeCombinedAvgRate(metal){
             if (!metalKey || metalKey === '__custom') {
                 return `
                     <div style="font-size:11px; font-weight:800; color:var(--text); margin:12px 0 6px;">${label}</div>
-                    ${rows.sort((a, b) => (b.weight - a.weight) || (b.value - a.value)).map(itemRowHtml).join('')}`;
+                    ${rows.sort((a, b) => (b.qty - a.qty) || (b.weight - a.weight) || (b.value - a.value)).map(itemRowHtml).join('')}`;
             }
 
             const byStamp = {};
@@ -2615,13 +2615,13 @@ function computeCombinedAvgRate(metal){
                 byStamp[st].value += s.value;
             });
             const stampBlocks = Object.entries(byStamp)
-                .sort((a, b) => b[1].weight - a[1].weight)
+                .sort((a, b) => (b[1].qty - a[1].qty) || (b[1].weight - a[1].weight))
                 .map(([stampName, g]) => `
                     <div style="display:flex; justify-content:space-between; align-items:center; margin:8px 0 4px 4px;">
                         <span style="font-size:11.5px; font-weight:700; color:var(--text2);">${stampName}</span>
                         <span style="font-size:11px; color:var(--text2);">${g.qty} pc${g.qty === 1 ? '' : 's'} · ${g.weight.toFixed(2)}g · ₹${g.value.toFixed(2)}</span>
                     </div>
-                    ${g.items.sort((a, b) => b.weight - a.weight).map(itemRowHtml).join('')}`).join('');
+                    ${g.items.sort((a, b) => (b.qty - a.qty) || (b.weight - a.weight) || (b.value - a.value)).map(itemRowHtml).join('')}`).join('');
 
             return `
                 <div style="font-size:11px; font-weight:800; color:var(--text); margin:12px 0 6px;">${label}</div>
@@ -2651,7 +2651,7 @@ function computeCombinedAvgRate(metal){
                 ${card('Installment Collections', '₹' + installmentPayments.toFixed(2))}
             </div>` : ''}
             <div onclick="_toggleSalesReportItems()" style="display:flex; justify-content:space-between; align-items:center; margin:16px 0 8px; cursor:pointer; user-select:none;">
-                <span style="font-size:10px; font-weight:700; letter-spacing:.08em; color:var(--text2); text-transform:uppercase;">Item-wise Sales (by weight sold · values incl. tax)</span>
+                <span style="font-size:10px; font-weight:700; letter-spacing:.08em; color:var(--text2); text-transform:uppercase;">Item-wise Sales (by pieces sold · values incl. tax)</span>
                 <span style="font-size:11px; color:var(--text2);">${_salesReportItemsExpanded ? '▾ Hide' : '▸ Show'}</span>
             </div>
             ${_salesReportItemsExpanded ? (itemSectionsHtml || '<p class="note" style="text-align:center;">No items to break down.</p>') : ''}
