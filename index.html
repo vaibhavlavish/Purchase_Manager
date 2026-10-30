@@ -2463,6 +2463,7 @@ function computeCombinedAvgRate(metal){
     //   areaAliases/{normalizedSpelling} = { area: "Chikhli", ts }
     // ═══════════════════════════════════════════════════════════════════
     function areaNorm(s) { return String(s || '').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim(); }
+    function _areaTitle(s) { return String(s || '').replace(/(^|\s)(\p{L})/gu, (m, a, b) => a + b.toUpperCase()); }   // display only: "ubad faliya" → "Ubad Faliya"
     function _areaEsc(x) { return String(x == null ? '' : x).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
     // → { empty:true } | { area:'Chikhli' } | { cand:'chikhlii' } (unmatched; cand = text to map)
     function areaResolve(addr) {
@@ -2585,12 +2586,23 @@ function computeCombinedAvgRate(metal){
         const st = window._areaLastStats; if (!st) return;
         window._areaQueue = st.queue;
         const body = st.queue.length ? st.queue.map((u, i) => `
-            <div onclick="areaFixOpen(${i})" style="text-align:left; padding:10px 12px; margin-bottom:6px; border:1.5px solid var(--border); border-radius:10px; cursor:pointer;">
-                <div style="font-size:14px; font-weight:800;">${_areaEsc(u.cand)}</div>
-                <div style="font-size:11px; color:var(--text2);">${u.inv} invoice${u.inv === 1 ? '' : 's'} · ₹${u.amt.toFixed(0)}${u.samples.length ? ' · e.g. “' + _areaEsc(u.samples[0]) + '”' : ''}</div>
+            <div onclick="areaFixOpen(${i})" style="display:flex; align-items:center; gap:8px; text-align:left; padding:10px 12px; margin-bottom:6px; border:1.5px solid var(--border); border-radius:10px; cursor:pointer;">
+                <div style="flex:1; min-width:0;">
+                    <div style="font-size:14px; font-weight:800;">${_areaEsc(_areaTitle(u.cand))}</div>
+                    <div style="font-size:11px; color:var(--text2);">${u.inv} invoice${u.inv === 1 ? '' : 's'} · ₹${u.amt.toFixed(0)}${u.samples.length ? ' · e.g. “' + _areaEsc(u.samples[0]) + '”' : ''}</div>
+                </div>
+                <button onclick="event.stopPropagation(); areaFixTick(${i})" style="flex:none; padding:8px 11px; border:none; border-radius:10px; background:#2E7D32; color:#fff; font-weight:800; font-size:12px;">✓ Correct</button>
             </div>`).join('') : '<p class="note">Nothing left to fix for this period 🎉</p>';
         _pmSetModal('Fix addresses', '<div style="text-align:left;"><p class="note" style="margin:0 0 10px;">Sorted by amount. Tap one to link it to the correct area — it is remembered for every past and future bill.</p>' + body + '</div>',
             _pmBtn('Close', 'closePmAlert()', 'ghost'));
+    }
+    // ✓ on a tile: the spelling shown is right — save it as its own area (after a confirm)
+    async function areaFixTick(i) {
+        const u = (window._areaQueue || [])[i]; if (!u) return;
+        const nm = _areaTitle(u.cand);
+        const ok = await _pmAsk('Save <b>' + _areaEsc(nm) + '</b> as a correct area name? Its ' + u.inv + ' invoice' + (u.inv === 1 ? '' : 's') + ' will be grouped under it.', 'Confirm area', '✓ Yes, correct');
+        if (!ok) { areaOpenQueue(); return; }
+        if (await areaMapTo(u.cand, nm)) { renderSalesReport(); areaOpenQueue(); }
     }
     function areaFixOpen(i) {
         const u = (window._areaQueue || [])[i]; if (!u) return;
@@ -2601,7 +2613,7 @@ function computeCombinedAvgRate(metal){
             <label style="font-size:11px; display:block; margin:6px 0 3px;">Link to an existing area</label>
             <select id="area-fix-sel" style="margin:0 0 8px; width:100%;">${list.map(a => `<option value="${_areaEsc(a)}">${_areaEsc(a)}</option>`).join('')}</select>
             <button onclick="areaFixPick(${i}, document.getElementById('area-fix-sel').value)" style="width:100%; padding:11px; margin-bottom:12px; border:none; border-radius:10px; background:var(--gold); color:#fff; font-weight:800;">Link</button>` : '';
-        _pmSetModal('Link “' + _areaEsc(u.cand) + '”',
+        _pmSetModal('Link “' + _areaEsc(_areaTitle(u.cand)) + '”',
             `<div style="text-align:left;">
                 <div style="font-size:11.5px; color:var(--text2); margin-bottom:10px;">${u.inv} invoice${u.inv === 1 ? '' : 's'} · ₹${u.amt.toFixed(0)}${u.samples.length ? '<br>Written as: ' + u.samples.map(x => '“' + _areaEsc(x) + '”').join(', ') : ''}</div>
                 ${sugBtn}${sel}
@@ -2623,7 +2635,7 @@ function computeCombinedAvgRate(metal){
         window._areaMgr = names;
         const body = names.length ? names.map((n, i) => {
             const own = areaNorm(n);
-            const chips = by[n].filter(k => k !== own).sort().map(k => `<span onclick="areaRemoveAlias('${encodeURIComponent(k)}')" style="display:inline-block; margin:3px 6px 0 0; padding:3px 9px; border-radius:12px; background:#eee; font-size:11.5px;">${_areaEsc(k)} ✕</span>`).join('');
+            const chips = by[n].filter(k => k !== own).sort().map(k => `<span onclick="areaRemoveAlias('${encodeURIComponent(k)}')" style="display:inline-block; margin:3px 6px 0 0; padding:3px 9px; border-radius:12px; background:#eee; font-size:11.5px;">${_areaEsc(_areaTitle(k))} ✕</span>`).join('');
             return `<div style="padding:10px 12px; margin-bottom:6px; border:1.5px solid var(--border); border-radius:10px;">
                 <div style="display:flex; justify-content:space-between; align-items:center;"><b style="font-size:14px;">${_areaEsc(n)}</b>
                 <span onclick="areaRename(${i})" style="font-size:11px; font-weight:700; color:#1565C0; cursor:pointer;">Rename / merge</span></div>
