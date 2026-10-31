@@ -117,6 +117,11 @@
         }
         * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
         html, body { height: 100%; margin: 0; padding: 0; }
+        html, body { overflow-x: hidden; max-width: 100%; }
+        /* iOS: grid/flex children may shrink below their content, and nothing may push the page sideways */
+        #pm-content, #pm-av-body, #pm-sup-body { overflow-x: hidden; min-width: 0; }
+        input[type=date], input[type=month], input[type=number], select { min-width: 0; max-width: 100%; }
+        #pm-content div[style*="display:grid"] > *, #pm-av-body div[style*="display:grid"] > * { min-width: 0; }
         body {
             font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
             background-color: #F7F7F5;
@@ -290,7 +295,7 @@
         <div id="pm-pane-sales" style="display:none;">
             <div style="background:var(--surface); border-radius:var(--radius); padding:14px; box-shadow:0 1px 6px rgba(0,0,0,.06);">
                 <div style="font-size:10px; font-weight:700; letter-spacing:.08em; color:var(--text2); text-transform:uppercase; margin-bottom:10px;">Sales Report — Current Track</div>
-                <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:10px;">
+                <div style="display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; margin-bottom:10px;">
                     <div>
                         <label style="font-size:11px; display:block; margin-bottom:3px;">From</label>
                         <input type="date" id="inv-rep-from" onchange="renderSalesReport()" style="margin:0;">
@@ -314,7 +319,7 @@
         <div id="pm-pane-report" style="display:none;">
             <div style="background:var(--surface); border-radius:var(--radius); padding:14px; box-shadow:0 1px 6px rgba(0,0,0,.06); margin-bottom:12px;">
                 <div style="font-size:10px; font-weight:700; letter-spacing:.08em; color:var(--text2); text-transform:uppercase; margin-bottom:10px;">Report period</div>
-                <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:10px;">
+                <div style="display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; margin-bottom:10px;">
                     <div><label style="font-size:11px; display:block; margin-bottom:3px;">From</label><input type="date" id="rp-from" onchange="rpSetDates()" style="margin:0;"></div>
                     <div><label style="font-size:11px; display:block; margin-bottom:3px;">To</label><input type="date" id="rp-to" onchange="rpSetDates()" style="margin:0;"></div>
                 </div>
@@ -336,7 +341,7 @@
                 <button onclick="openPaymentModal()" style="flex:1; padding:13px; background:#1a1a1a; color:white; border:none; border-radius:12px; font-size:14px; font-weight:800;">💳 Payment</button>
             </div>
 
-            <div id="hedge-summary-cards" style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:12px;"></div>
+            <div id="hedge-summary-cards" style="display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; margin-bottom:12px;"></div>
 
             <div id="hedge-sales-track" style="margin-bottom:4px;"></div>
 
@@ -2123,7 +2128,7 @@ function computeCombinedAvgRate(metal){
         // 1. Summary
         html += `<div style="${_rpCardAcc('#1565C0')}">
             ${_rpHead('📊', 'Summary', '#1565C0', `${_rpShort(from)} – ${_rpShort(to)} · ${days} day${days > 1 ? 's' : ''}`)}
-            <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:8px; text-align:center;">
+            <div style="display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:8px; text-align:center;">
                 <div><div style="font-size:17px; font-weight:800; color:#2E7D32;">${_rpFmt(T.in)}</div><div style="font-size:11px; color:var(--text2);">Money in</div></div>
                 <div><div style="font-size:17px; font-weight:800; color:#C62828;">${_rpFmt(T.out)}</div><div style="font-size:11px; color:var(--text2);">Money out</div></div>
                 <div><div style="font-size:17px; font-weight:800; color:${net >= 0 ? '#2E7D32' : '#C62828'};">${net < 0 ? '−' : ''}${_rpFmt(Math.abs(net))}</div><div style="font-size:11px; color:var(--text2);">Net</div></div>
@@ -2351,7 +2356,7 @@ function computeCombinedAvgRate(metal){
         const peakWi = wdAvg.indexOf(Math.max(...wdAvg));
         const peakD = Object.keys(perDay).sort((a, b) => perDay[b] - perDay[a] || a.localeCompare(b))[0];
         const stat = (lbl, val, sub) => `<div style="background:#F7F7F5; border-radius:10px; padding:9px 11px;"><div style="font-size:11px; color:var(--text2);">${lbl}</div><div style="font-size:15px; font-weight:800;">${val}</div>${sub ? `<div style="font-size:10.5px; color:var(--text2);">${sub}</div>` : ''}</div>`;
-        const statsHtml = `<div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:14px;">
+        const statsHtml = `<div style="display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; margin-top:14px;">
                 ${stat('Customers (invoices)', invs.length, (invs.length / allDays.length).toFixed(1) + ' per day')}
                 ${stat('Busiest hour', hrFull(peakH) + '–' + hrFull((peakH + 1) % 24), hours[peakH] + ' invoices')}
                 ${stat('Busiest weekday', wdName[order[peakWi]], wdAvg[peakWi].toFixed(1) + ' avg per day')}
@@ -2741,7 +2746,7 @@ function computeCombinedAvgRate(metal){
             <button onclick="areaDetailClose()" aria-label="Close" style="flex:none; width:34px; height:34px; margin:0; padding:0; border:none; border-radius:50%; background:#eee; color:#333; font-size:18px; font-weight:800; line-height:1; box-shadow:none;">✕</button>
         </div><div style="padding:4px 16px 26px;">`;
 
-        h += `<div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:12px;">
+        h += `<div style="display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; margin-top:12px;">
             ${tile('Total billed', _rpFmt(D.billed))}
             ${tile('Average per invoice', _rpFmt(u.inv ? D.billed / u.inv : 0))}
             ${tile('🟡 Gold sold', D.grams.Gold.toFixed(2) + ' g', 'pure grams')}
@@ -3130,7 +3135,7 @@ function computeCombinedAvgRate(metal){
         const card = (label, value, sub) => `
             <div style="background:var(--surface); border-radius:var(--radius); padding:14px; box-shadow:0 1px 6px rgba(0,0,0,.06);">
                 <div style="font-size:10px; font-weight:700; letter-spacing:.08em; color:var(--text2); text-transform:uppercase; margin-bottom:6px;">${label}</div>
-                <div style="font-size:18px; font-weight:800; color:var(--text);">${value}</div>
+                <div style="font-size:clamp(12px,3.6vw,18px); font-weight:800; color:var(--text); overflow-wrap:anywhere; line-height:1.2;">${value}</div>
                 ${sub ? `<div style="font-size:10.5px; color:var(--text2); margin-top:2px;">${sub}</div>` : ''}
             </div>`;
 
@@ -3214,24 +3219,24 @@ function computeCombinedAvgRate(metal){
         window._areaLastStats = _areaStats;
 
         resultsEl.innerHTML = `
-            <div style="display:grid; grid-template-columns:1fr; gap:10px; margin-top:14px;">
+            <div style="display:grid; grid-template-columns:minmax(0,1fr); gap:10px; margin-top:14px;">
                 ${card('Total Billed', '₹' + totalBilled.toFixed(2), inRange.length + ' invoice' + (inRange.length === 1 ? '' : 's'))}
             </div>
-            <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:10px; margin-top:10px;">
+            <div style="display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:10px; margin-top:10px;">
                 ${card('Cash', '₹' + cashTotal.toFixed(2))}
                 ${card('UPI', '₹' + upiTotal.toFixed(2))}
                 ${card('Card', '₹' + cardTotal.toFixed(2))}
             </div>
-            <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-top:10px;">
+            <div style="display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; margin-top:10px;">
                 ${metalCard('Gold', '🟡')}
                 ${metalCard('Silver', '⚪')}
             </div>
-            <div style="display:grid; grid-template-columns:1fr; gap:10px; margin-top:10px;">
+            <div style="display:grid; grid-template-columns:minmax(0,1fr); gap:10px; margin-top:10px;">
                 ${card('Old Jewellery Taken In', '₹' + ogTotal.toFixed(2), 'Value only, weight not tracked on old-jewellery entries')}
             </div>
             ${(downPayments > 0 || installmentPayments > 0) ? `
             <div style="font-size:10px; font-weight:700; letter-spacing:.08em; color:var(--text2); text-transform:uppercase; margin:16px 0 8px;">Installment Activity (separate from above)</div>
-            <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+            <div style="display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px;">
                 ${card('Down Payments', '₹' + downPayments.toFixed(2))}
                 ${card('Installment Collections', '₹' + installmentPayments.toFixed(2))}
             </div>` : ''}
@@ -4085,7 +4090,7 @@ function computeCombinedAvgRate(metal){
         _pmSetModal('Archive viewer',
             '<div style="text-align:left; font-size:13px;">' +
             '<div style="' + sec + '">📅 Pick a date range — live + archived data</div>' +
-            '<div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:8px;">' +
+            '<div style="display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; margin-bottom:8px;">' +
             '<div><label style="font-size:11px; display:block; margin-bottom:3px;">From</label><input type="date" id="pm-av-from" value="' + from + '" style="margin:0; width:100%;"></div>' +
             '<div><label style="font-size:11px; display:block; margin-bottom:3px;">To</label><input type="date" id="pm-av-to" value="' + to + '" style="margin:0; width:100%;"></div></div>' +
             '<div class="note" style="margin-bottom:6px;">Shows everything in this range: live data, plus anything archived in the cloud. Records that are in both are shown once.</div><div style="font-size:11px; font-weight:700; margin-bottom:4px;">Archived months available</div><div id="pm-av-months" class="note">Loading…</div>' +
@@ -4374,7 +4379,7 @@ function computeCombinedAvgRate(metal){
                 html += '<div style="padding:0 14px 14px; border-top:1px solid var(--border);">';
                 // Owed now
                 html += `<div style="${_hdCss} margin-top:12px;">Owed now</div>
-                    <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:12px;">`;
+                    <div style="display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; margin-bottom:12px;">`;
                 const owedBox = (label, val, bad) => `<div style="background:#F7F7F5; border-radius:10px; padding:9px 11px;"><div style="${lbl}">${label}</div><div style="font-size:15px; font-weight:800; color:${bad ? '#C62828' : '#2E7D32'};">${val}</div></div>`;
                 html += owedBox('Gold', d.metals.Gold.owed.toFixed(2) + ' g', d.metals.Gold.owed > 0.001);
                 html += owedBox('Silver', d.metals.Silver.owed.toFixed(2) + ' g', d.metals.Silver.owed > 0.001);
@@ -4449,7 +4454,7 @@ function computeCombinedAvgRate(metal){
     function pmArchiveMenuOpen() {
         _pmSetModal('Archive data',
             '<div style="text-align:left; font-size:13px;"><p class="note" style="margin:0 0 10px;">Copies sales, cash book, purchases, supplier payments and piece bills for a date range into a separate cloud archive for analytics. Live data is never deleted by this. The supplier list itself is not archived.</p>' +
-            '<div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:8px;">' +
+            '<div style="display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; margin-bottom:8px;">' +
             '<div><label style="font-size:11px; display:block; margin-bottom:3px;">From</label><input type="date" id="pm-ar-from" style="margin:0; width:100%;"></div>' +
             '<div><label style="font-size:11px; display:block; margin-bottom:3px;">To</label><input type="date" id="pm-ar-to" style="margin:0; width:100%;"></div></div>' +
             '<div id="pm-ar-msg" class="note" style="min-height:14px;"></div></div>',
@@ -4465,7 +4470,7 @@ function computeCombinedAvgRate(metal){
         const f = _rpRange.from || _rpDate(new Date()), t = _rpRange.to || _rpDate(new Date());
         _pmSetModal('Export CSV',
             '<div style="text-align:left; font-size:13px;"><p class="note" style="margin:0 0 10px;">Cash book entries for the dates below (Track B).</p>' +
-            '<div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:8px;">' +
+            '<div style="display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; margin-bottom:8px;">' +
             '<div><label style="font-size:11px; display:block; margin-bottom:3px;">From</label><input type="date" id="pm-ex-from" value="' + f + '" style="margin:0; width:100%;"></div>' +
             '<div><label style="font-size:11px; display:block; margin-bottom:3px;">To</label><input type="date" id="pm-ex-to" value="' + t + '" style="margin:0; width:100%;"></div></div>' +
             '<div id="pm-ex-msg" class="note" style="min-height:14px; color:#C62828;"></div></div>',
