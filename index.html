@@ -2539,7 +2539,7 @@ function computeCombinedAvgRate(metal){
         if (!_areaSectionOpen) return head;
         const rows = st.areas.slice().sort((a, b) => _areaSort === 'cust'
             ? ((b.cust.size - a.cust.size) || (b.amt - a.amt)) : ((b.amt - a.amt) || (b.cust.size - a.cust.size)));
-        const maxAmt = Math.max(1, ...rows.map(r => r.amt), st.unTot.amt);
+        const maxAmt = Math.max(1, ...rows.map(r => r.amt), st.unTot.amt, st.noAddr.amt);
         const chip = (active, label, fn) => `<span onclick="${fn}" style="cursor:pointer; user-select:none; padding:5px 10px; border-radius:14px; font-size:11px; font-weight:700; margin:0 6px 6px 0; display:inline-block; background:${active ? 'var(--text)' : '#eee'}; color:${active ? '#fff' : 'var(--text)'};">${label}</span>`;
         const row = (name, o, color, fn) => `
             <div ${fn ? `onclick="${fn}"` : ''} style="background:var(--surface); border-radius:var(--radius); padding:10px 14px; margin-bottom:6px; box-shadow:0 1px 6px rgba(0,0,0,.06); ${fn ? 'cursor:pointer;' : ''}">
@@ -2548,7 +2548,7 @@ function computeCombinedAvgRate(metal){
                     <div style="font-size:13px; font-weight:800;">₹${o.amt.toFixed(0)}</div>
                 </div>
                 <div style="font-size:11px; color:var(--text2); margin-top:2px;">${o.cust.size} customer${o.cust.size === 1 ? '' : 's'} · ${o.inv} invoice${o.inv === 1 ? '' : 's'}</div>
-                <div style="height:4px; border-radius:2px; background:#eee; margin-top:6px;"><div style="height:4px; border-radius:2px; width:${Math.max(2, o.amt / maxAmt * 100)}%; background:${color || '#1565C0'};"></div></div>
+                <div style="height:4px; border-radius:2px; background:#eee; margin-top:6px; overflow:hidden;"><div style="height:4px; border-radius:2px; width:${Math.min(100, Math.max(2, o.amt / maxAmt * 100))}%; background:${color || '#1565C0'};"></div></div>
             </div>`;
         return `${head}
             <div style="margin-bottom:8px;">
