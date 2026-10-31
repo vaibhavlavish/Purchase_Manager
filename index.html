@@ -678,7 +678,7 @@
     // ── Global state, synced from Firebase (read-only except where noted) ──
     let installmentPlans = [];
     let invoiceHistory = [];
-    let areaGroups = [];    // display-only combined areas — stored at pmMeta/areaGroups (covered by the existing pmMeta rule and backups)
+    let areaGroups = [];    // display-only combined areas — node 'areaGroups'
     let areaAliases = {};   // normalized spelling -> { area } — shared with the POS (root node 'areaAliases')
     let productData = {};
     let rates = { gold: {}, silver: {} };
@@ -725,7 +725,7 @@
             _pmRerenderSoon();
         }, err => console.error('[AreaAliases] read error', err));
 
-        window.dbOnValue(window.dbRef(window.firebaseDB, 'pmMeta/areaGroups'), snap => {
+        window.dbOnValue(window.dbRef(window.firebaseDB, 'areaGroups'), snap => {
             areaGroups = Object.values(snap.val() || {}).filter(g => g && g.members).map(g => ({
                 id: g.id, members: (Array.isArray(g.members) ? g.members : Object.values(g.members)).filter(Boolean)
             })).filter(g => g.id && g.members.length);
@@ -2543,7 +2543,7 @@ function computeCombinedAvgRate(metal){
 
     // ── Display groups: two or more areas shown as ONE tile ("Ubad Faliya, Station Road"). Display only —
     //    nothing in areaAliases or the invoices changes, and a group can be decoupled at any time.
-    //    Stored at pmMeta/areaGroups/{id}: {id} = { id, members: [areaName, ...], ts }
+    //    Stored in the 'areaGroups' node: areaGroups/{id} = { id, members: [areaName, ...], ts }
     function _areaUnits(st) {
         const byArea = {};
         areaGroups.forEach(g => g.members.forEach(m => { byArea[m] = g; }));
@@ -2566,7 +2566,7 @@ function computeCombinedAvgRate(metal){
     }
     async function _areaGroupWrite(upd) {
         try {
-            await window.dbUpdate(window.dbRef(window.firebaseDB, 'pmMeta/areaGroups'), upd);
+            await window.dbUpdate(window.dbRef(window.firebaseDB, 'areaGroups'), upd);
             Object.keys(upd).forEach(k => {
                 areaGroups = areaGroups.filter(g => g.id !== k);
                 if (upd[k]) areaGroups.push({ id: k, members: upd[k].members.slice() });
@@ -3196,13 +3196,13 @@ function computeCombinedAvgRate(metal){
     // areaAliases (shared with the POS) IS included — it is small, and PM is its only editor.
     // ═══════════════════════════════════════════════════════════════════
     const PM_BK_NODES = ['parties', 'purchases', 'payments', 'pieceSupplies', 'manualOwedLog',
-                         'hedgeSalesStartDates', 'cashbook', 'pmSales', 'pmMeta', 'areaAliases'];
+                         'hedgeSalesStartDates', 'cashbook', 'pmSales', 'pmMeta', 'areaAliases', 'areaGroups'];
     // Added after v1 backups already existed: older backups have no entry for these. Restoring such a
     // backup must leave the live node alone (never delete it), so they are skipped when absent from the backup.
-    const PM_BK_OPTIONAL = ['areaAliases'];
+    const PM_BK_OPTIONAL = ['areaAliases', 'areaGroups'];
     const PM_BK_LABEL = { parties: 'Suppliers', purchases: 'Purchases', payments: 'Supplier payments',
         pieceSupplies: 'Piece supplies', manualOwedLog: 'Manual owed log', hedgeSalesStartDates: 'Sales start dates',
-        cashbook: 'Cash book', pmSales: 'Sales copy', pmMeta: 'Meta', areaAliases: 'Area aliases' };
+        cashbook: 'Cash book', pmSales: 'Sales copy', pmMeta: 'Meta', areaAliases: 'Area aliases', areaGroups: 'Area groups' };
     const PM_BK_VERSION = 1;
     const PM_BK_KEEP = 14;
     const PM_BK_CHUNK = 3 * 1024 * 1024;        // max bytes per cloud write while saving a snapshot
@@ -3295,7 +3295,7 @@ function computeCombinedAvgRate(metal){
     }
     async function _pmBkReadAll() {
         const out = {};
-        await Promise.all(PM_BK_NODES.map(async n => { const s = await window.dbGet(_pmRefAt(n)); out[n] = s.val(); }));
+        await Promise.all(PM_BK_NODES.map(async n => { try { const s = await window.dbGet(_pmRefAt(n)); out[n] = s.val(); } catch (e) { if (n === 'areaGroups') out[n] = null; else throw e; } }));   // areaGroups: tolerated until its Firebase rule is published
         return out;
     }
     function _pmBkCounts(cur) { const c = {}; PM_BK_NODES.forEach(n => { c[n] = _pmCount(cur[n]); }); return c; }
