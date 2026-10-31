@@ -246,7 +246,6 @@
 
     <input type="file" id="pm-av-file" multiple accept=".json,application/json" style="display:none;" onchange="pmAvFilesChosen(this)">
     <input type="file" id="pm-restore-file" accept=".json,application/json" style="display:none;" onchange="pmRestoreFileChosen(this)">
-    <input type="file" id="pm-imp-file" multiple accept=".json,application/json" style="display:none;" onchange="pmImpFilesChosen(this)">
 
     <!-- "More" dropdown (Track B only) -->
     <div id="pm-more-backdrop" onclick="pmMoreClose()"></div>
@@ -254,7 +253,6 @@
         <button onclick="pmMoreGo(pmSupOpen)">👥 Supplier list</button>
         <button onclick="pmMoreGo(() => location.reload())">🔄 Refresh</button>
         <div class="sep"></div>
-        <button onclick="pmMoreGo(pmImpOpen)">⬆ Import POS backup (one-time)</button>
         <button onclick="pmMoreGo(pmAvOpen)">🗄 Archive viewer</button>
         <button onclick="pmMoreGo(pmBackupMenuOpen)">☁ Backup &amp; restore</button>
         <button onclick="pmMoreGo(pmArchiveMenuOpen)">📦 Archive data</button>
@@ -4126,125 +4124,6 @@ function computeCombinedAvgRate(metal){
         const d = (document.getElementById('rp-del-date') || {}).value;
         if (!d) { const m = document.getElementById('pm-del-msg'); if (m) m.textContent = 'Pick the cut-off date first. Everything BEFORE it will be deleted.'; return; }
         rpDeleteBefore(kind);
-    }
-
-    // ═══════════════════════════════════════════════════════════════════
-    // ONE-TIME IMPORT OF POS BACKUP JSON FILES INTO pmSales
-    // (remove this whole block, the "pm-imp-file" input and the More-menu item after use)
-    // ═══════════════════════════════════════════════════════════════════
-    let _pmImp = null;
-    function pmImpOpen() {
-        if (_pmAvBlocked()) return;
-        _pmImp = null;
-        _pmSetModal('Import POS backup',
-            '<div style="text-align:left; font-size:13px;"><p class="note" style="margin:0 0 10px;">Choose all your POS backup .json files at once. Invoices are copied into the Purchase Manager sales data. An invoice that is already there (same id) is skipped, so nothing is counted twice. The POS is never touched. You will see a preview before anything is written.</p></div>',
-            _pmPopWrap(_pmBtn('📄 Choose JSON file(s)', 'pmImpPick()') + _pmBtn('Close', 'closePmAlert()', 'ghost')));
-    }
-    function pmImpPick() { closePmAlert(); const i = document.getElementById('pm-imp-file'); if (i) { i.value = ''; i.click(); } }
-    // Finds the invoice list inside any reasonable backup layout
-    function _pmImpFind(o, depth) {
-        if (!o || typeof o !== 'object' || depth > 6) return null;
-        const looks = x => x && typeof x === 'object' && !Array.isArray(x) && x.items && x.timestamp;
-        if (!Array.isArray(o) && o.invoiceHistory && typeof o.invoiceHistory === 'object') return Array.isArray(o.invoiceHistory) ? o.invoiceHistory : Object.values(o.invoiceHistory);
-        if (Array.isArray(o)) { if (o.some(looks)) return o; }
-        else { const v = Object.values(o); if (v.length && v.some(looks)) return v; }
-        for (const k of Object.keys(o)) { const r = _pmImpFind(o[k], depth + 1); if (r) return r; }
-        return null;
-    }
-    function pmImpFilesChosen(inp) {
-        const files = Array.from(inp.files || []); if (!files.length) return;
-        Promise.all(files.map(f => new Promise(res => {
-            const rd = new FileReader();
-            rd.onload = () => res({ name: f.name, text: rd.result });
-            rd.onerror = () => res({ name: f.name, error: 'could not be read' });
-            rd.readAsText(f);
-        }))).then(list => {
-            inp.value = '';
-            const seen = new Map(), perFile = []; let noId = 0, badId = 0, dupInFiles = 0;
-            list.forEach(it => {
-                if (it.error) { perFile.push({ name: it.name, err: it.error }); return; }
-                let o; try { o = JSON.parse(it.text); } catch (e) { perFile.push({ name: it.name, err: 'not valid JSON' }); return; }
-                const arr = _pmImpFind(o, 0);
-                if (!arr) { perFile.push({ name: it.name, err: 'no invoices found in this file' }); return; }
-                let n = 0;
-                arr.forEach(inv => {
-                    if (!inv || typeof inv !== 'object' || !inv.items || !inv.timestamp) return;
-                    if (inv.id == null || inv.id === '') { noId++; return; }
-                    const id = String(inv.id);
-                    if (/[.$#\[\]\/]/.test(id)) { badId++; return; }
-                    n++;
-                    if (seen.has(id)) { dupInFiles++; return; }
-                    seen.set(id, inv);
-                });
-                perFile.push({ name: it.name, count: n });
-            });
-            const have = new Set(invoiceHistory.map(i => String(i.id)));
-            const fresh = [], existing = [];
-            seen.forEach((inv, id) => { (have.has(id) ? existing : fresh).push(inv); });
-            const days = fresh.map(i => _pmArSaleDay(i)).filter(Boolean).sort();
-            const trk = { A: 0, B: 0, none: 0 }; let drafts = 0;
-            fresh.forEach(i => { if (i.track === 'A' || i.track === 'B') trk[i.track]++; else trk.none++; if (i.draft) drafts++; });
-            _pmImp = { fresh, perFile };
-            const rows = perFile.map(f => '<div style="display:flex; justify-content:space-between; gap:8px; font-size:12px; padding:3px 0; border-top:1px solid #eee;"><span style="word-break:break-all;">' + _rpEsc(f.name) + '</span><b style="white-space:nowrap; color:' + (f.err ? '#C62828' : 'inherit') + ';">' + (f.err ? _rpEsc(f.err) : f.count + ' invoices') + '</b></div>').join('');
-            const stat = (l, v) => '<div style="display:flex; justify-content:space-between; font-size:13px; padding:3px 0;"><span>' + l + '</span><b>' + v + '</b></div>';
-            let body = '<div style="text-align:left;">' + rows +
-                '<div style="margin-top:10px; border-top:2px solid #eee; padding-top:8px;">' +
-                stat('Unique invoices in files', seen.size) +
-                stat('Already in Purchase Manager (skipped)', existing.length) +
-                stat('<span style="color:#2E7D32;">New — will be imported</span>', '<span style="color:#2E7D32;">' + fresh.length + '</span>') +
-                (dupInFiles ? stat('Repeated across your files (skipped)', dupInFiles) : '') +
-                (noId || badId ? stat('<span style="color:#C62828;">Unusable (no/invalid id)</span>', '<span style="color:#C62828;">' + (noId + badId) + '</span>') : '') +
-                (fresh.length ? stat('Date range of new invoices', _rpEsc(days[0] || '?') + ' → ' + _rpEsc(days[days.length - 1] || '?')) +
-                    stat('Track B / Track A / no track', trk.B + ' / ' + trk.A + ' / ' + trk.none) +
-                    (drafts ? stat('Drafts included', drafts) : '') : '') + '</div>';
-            if (fresh.length && trk.none > 0) {
-                body += '<label style="font-size:12px; display:block; margin:10px 0 3px;">' + trk.none + ' invoice(s) have no track. Put them in:</label>' +
-                    '<select id="pm-imp-track" style="margin:0; width:100%;"><option value="B">Track B</option><option value="A">Track A</option><option value="skip">Skip them</option></select>';
-            }
-            body += '<p class="note" style="margin:10px 0 0;">A cloud backup is saved first. Imported invoices dated after "Count sales since" will raise the owed grams in the Purchase tab.</p></div>';
-            _pmSetModal('Import preview', body,
-                _pmPopWrap((fresh.length ? _pmBtn('✓ Import ' + fresh.length + ' invoices', 'pmImpGo()') : '') + _pmBtn('Cancel', 'pmImpCancel()', 'ghost')));
-        });
-    }
-    function pmImpCancel() { _pmImp = null; closePmAlert(); }
-    async function pmImpGo() {
-        if (_pmAvBlocked()) return;
-        const st = _pmImp; if (!st || !st.fresh.length) return;
-        if (!window._writeAllowed) { closePmAlert(); showCustomAlert('This copy is read-only, so importing is disabled. Open the official app.'); return; }
-        if (_pmBkBusy || _pmArBusy) { showCustomAlert('A backup or archive is running. Try again in a moment.'); return; }
-        const selEl = document.getElementById('pm-imp-track'), choice = selEl ? selEl.value : 'B';
-        const list = [];
-        st.fresh.forEach(inv => {
-            if (inv.track === 'A' || inv.track === 'B') { list.push(inv); return; }
-            if (choice === 'skip') return;
-            list.push(Object.assign({}, inv, { track: choice }));
-        });
-        if (!list.length) { closePmAlert(); showCustomAlert('Nothing to import.'); return; }
-        _pmImp = null;
-        try {
-            _pmSetModal('Importing…', '<div style="font-size:13px;">Saving a cloud backup first. Do not close this page.</div>', '');
-            const bk = await pmBackupNow('before-import', { silent: true });
-            if (!bk.ok && bk.reason !== 'empty') {
-                if (!(await _pmAsk('The cloud backup could not be saved. Import anyway?', 'Backup failed', 'Import anyway'))) { closePmAlert(); return; }
-            }
-            let upd = {}, bytes = 0, done = 0;
-            const flush = async () => { if (Object.keys(upd).length) { await window.dbUpdate(_pmRoot(), upd); upd = {}; bytes = 0; } };
-            for (const inv of list) {
-                const sz = _pmBytes(inv);
-                if (bytes + sz > PM_BK_CHUNK && Object.keys(upd).length) await flush();
-                upd['pmSales/' + inv.id] = inv; bytes += sz; done++;
-                if (done % 50 === 0) _pmSetModal('Importing…', '<div style="font-size:13px;">' + done + ' of ' + list.length + '…</div>', '');
-            }
-            await flush();
-            _pmSetModal('Importing…', '<div style="font-size:13px;">Verifying…</div>', '');
-            const keys = new Set(Object.keys((await _pmShallow('pmSales')) || {}));
-            const missing = list.filter(i => !keys.has(String(i.id))).length;
-            if (missing) throw new Error(missing + ' invoice(s) did not arrive in the cloud');
-            _pmSetModal('Import complete', '<div style="text-align:left; font-size:13px;">✅ Imported <b>' + list.length + '</b> invoices and verified them in the cloud. Open the Sales tab and choose All Time to see them.</div>', _pmBtn('Close', 'closePmAlert()', 'ghost'));
-        } catch (e) {
-            console.error('[PM import] failed', e);
-            _pmSetModal('Import failed', '<div style="text-align:left; font-size:13px; color:#C62828;">' + _rpEsc(e && e.message ? e.message : e) + '<br><br>You can run the import again — invoices already saved are skipped.</div>', _pmBtn('Close', 'closePmAlert()', 'ghost'));
-        }
     }
 
     // ── Boot ──
