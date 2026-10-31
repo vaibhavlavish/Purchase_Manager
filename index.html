@@ -570,6 +570,10 @@
     </div>
 </div>
 
+<div id="area-detail-modal" onclick="if(event.target===this) areaDetailClose()" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.55); z-index:1170; align-items:flex-end; justify-content:center;">
+    <div id="area-detail-panel" style="background:white; border-radius:20px 20px 0 0; width:100%; max-width:560px; max-height:92vh; overflow-y:auto; box-shadow:0 -8px 32px rgba(0,0,0,0.15);"></div>
+</div>
+
 <div id="pm-alert-modal">
     <div id="pm-alert-panel" style="text-align:center;">
         <h3 id="pm-alert-title" style="margin:0 0 10px; font-size:18px; color:#1a1a1a;">Alert</h3>
@@ -674,6 +678,7 @@
     // ── Global state, synced from Firebase (read-only except where noted) ──
     let installmentPlans = [];
     let invoiceHistory = [];
+    let areaGroups = [];    // display-only combined areas — stored at pmMeta/areaGroups (covered by the existing pmMeta rule and backups)
     let areaAliases = {};   // normalized spelling -> { area } — shared with the POS (root node 'areaAliases')
     let productData = {};
     let rates = { gold: {}, silver: {} };
@@ -719,6 +724,13 @@
             areaAliases = snap.val() || {};
             _pmRerenderSoon();
         }, err => console.error('[AreaAliases] read error', err));
+
+        window.dbOnValue(window.dbRef(window.firebaseDB, 'pmMeta/areaGroups'), snap => {
+            areaGroups = Object.values(snap.val() || {}).filter(g => g && g.members).map(g => ({
+                id: g.id, members: (Array.isArray(g.members) ? g.members : Object.values(g.members)).filter(Boolean)
+            })).filter(g => g.id && g.members.length);
+            _pmRerenderSoon();
+        }, err => console.error('[AreaGroups] read error', err));
 
         window.dbOnValue(window.dbRef(window.firebaseDB, 'cashbook'), snap => {
             cashbook = _objToArraySimple(snap.val());
@@ -2500,23 +2512,24 @@ function computeCombinedAvgRate(metal){
         });
         return (best && bd <= t) ? best : null;
     }
+    // Customers are matched by NAME (mobile numbers are mostly not recorded); mobile is only a fallback.
     function _areaCustKey(inv) {
+        const nm = String(inv.custName || '').trim().toLowerCase().replace(/\s+/g, ' ');
+        if (nm && nm !== '—') return 'n:' + nm;
         const mob = String(inv.custMob || '').replace(/\D/g, '');
-        if (mob) return 'm:' + mob;
-        const nm = String(inv.custName || '').trim().toLowerCase();
-        return (nm && nm !== '—') ? 'n:' + nm : 'i:' + inv.id;
+        return mob ? 'm:' + mob : 'i:' + inv.id;
     }
     function _areaBuildStats(invs) {
         const areas = {}, un = {};
-        const noAddr = { inv: 0, amt: 0, cust: new Set() };
+        const noAddr = { inv: 0, amt: 0, cust: new Set(), invs: [] };
         const unTot = { inv: 0, amt: 0, cust: new Set() };
         invs.forEach(inv => {
             const amt = (inv.totals && inv.totals.rounded) || 0, ck = _areaCustKey(inv);
             const r = areaResolve(inv.custAddr);
-            if (r.empty) { noAddr.inv++; noAddr.amt += amt; noAddr.cust.add(ck); }
+            if (r.empty) { noAddr.inv++; noAddr.amt += amt; noAddr.cust.add(ck); noAddr.invs.push(inv); }
             else if (r.area) {
-                const a = areas[r.area] || (areas[r.area] = { name: r.area, inv: 0, amt: 0, cust: new Set() });
-                a.inv++; a.amt += amt; a.cust.add(ck);
+                const a = areas[r.area] || (areas[r.area] = { name: r.area, inv: 0, amt: 0, cust: new Set(), invs: [] });
+                a.inv++; a.amt += amt; a.cust.add(ck); a.invs.push(inv);
             } else {
                 const u = un[r.cand] || (un[r.cand] = { cand: r.cand, inv: 0, amt: 0, cust: new Set(), samples: [] });
                 u.inv++; u.amt += amt; u.cust.add(ck);
@@ -2527,39 +2540,241 @@ function computeCombinedAvgRate(metal){
         });
         return { areas: Object.values(areas), queue: Object.values(un).sort((a, b) => (b.amt - a.amt) || (b.inv - a.inv)), noAddr, unTot };
     }
-    let _areaSectionOpen = false, _areaSort = 'amt';
+
+    // ── Display groups: two or more areas shown as ONE tile ("Ubad Faliya, Station Road"). Display only —
+    //    nothing in areaAliases or the invoices changes, and a group can be decoupled at any time.
+    //    Stored at pmMeta/areaGroups/{id}: {id} = { id, members: [areaName, ...], ts }
+    function _areaUnits(st) {
+        const byArea = {};
+        areaGroups.forEach(g => g.members.forEach(m => { byArea[m] = g; }));
+        const units = [], gmap = {};
+        st.areas.forEach(a => {
+            const g = byArea[a.name];
+            if (!g) { units.push({ key: 'a:' + a.name, type: 'a', label: a.name, members: [a.name], inv: a.inv, amt: a.amt, cust: a.cust, invs: a.invs, parts: [a] }); return; }
+            let u = gmap[g.id];
+            if (!u) {
+                u = gmap[g.id] = { key: 'g:' + g.id, type: 'g', gid: g.id, label: g.members.join(', '), members: g.members.slice(), inv: 0, amt: 0, cust: new Set(), invs: [], parts: [] };
+                units.push(u);
+            }
+            u.inv += a.inv; u.amt += a.amt; a.cust.forEach(c => u.cust.add(c)); u.invs = u.invs.concat(a.invs); u.parts.push(a);
+        });
+        return units;
+    }
+    function _areaFindUnit(key) {
+        if (key === 'x:noaddr') return window._areaNoAddrUnit || null;
+        return (window._areaUnitList || []).find(u => u.key === key) || null;
+    }
+    async function _areaGroupWrite(upd) {
+        try {
+            await window.dbUpdate(window.dbRef(window.firebaseDB, 'pmMeta/areaGroups'), upd);
+            Object.keys(upd).forEach(k => {
+                areaGroups = areaGroups.filter(g => g.id !== k);
+                if (upd[k]) areaGroups.push({ id: k, members: upd[k].members.slice() });
+            });
+            return true;
+        } catch (e) {
+            console.error('[AreaGroups] write failed', e);
+            showCustomAlert('Could not save: ' + _areaEsc(e && e.message ? e.message : e));
+            return false;
+        }
+    }
+
+    let _areaSectionOpen = false, _areaSort = 'amt', _areaShowAll = false;
     function _toggleAreaSection() { _areaSectionOpen = !_areaSectionOpen; renderSalesReport(); }
     function _setAreaSort(m) { _areaSort = m; renderSalesReport(); }
+    function _toggleAreaAll() { _areaShowAll = !_areaShowAll; renderSalesReport(); }
     function _areaSectionHtml(st) {
         const accent = '#1565C0';
         const nFix = st.queue.length;
         const head = _sectionTile('_toggleAreaSection()', '📍', 'Area-wise Sales',
             'Customers &amp; amount by town/village' + (nFix ? ' · <b style="color:#E65100;">' + nFix + ' address' + (nFix === 1 ? '' : 'es') + ' to fix</b>' : ''),
             _areaSectionOpen, accent);
-        if (!_areaSectionOpen) return head;
-        const rows = st.areas.slice().sort((a, b) => _areaSort === 'cust'
+        const units = _areaUnits(st).sort((a, b) => _areaSort === 'cust'
             ? ((b.cust.size - a.cust.size) || (b.amt - a.amt)) : ((b.amt - a.amt) || (b.cust.size - a.cust.size)));
-        const maxAmt = Math.max(1, ...rows.map(r => r.amt), st.unTot.amt, st.noAddr.amt);
+        window._areaUnitList = units;
+        window._areaNoAddrUnit = st.noAddr.inv ? { key: 'x:noaddr', type: 'x', label: 'No address on invoice', members: [], inv: st.noAddr.inv, amt: st.noAddr.amt, cust: st.noAddr.cust, invs: st.noAddr.invs, parts: [] } : null;
+        if (!_areaSectionOpen) return head;
+        const TOP = 10;
+        const shown = _areaShowAll ? units : units.slice(0, TOP);
+        const rest = units.slice(TOP);
+        const maxAmt = Math.max(1, ...units.map(r => r.amt), st.unTot.amt, st.noAddr.amt);
         const chip = (active, label, fn) => `<span onclick="${fn}" style="cursor:pointer; user-select:none; padding:5px 10px; border-radius:14px; font-size:11px; font-weight:700; margin:0 6px 6px 0; display:inline-block; background:${active ? 'var(--text)' : '#eee'}; color:${active ? '#fff' : 'var(--text)'};">${label}</span>`;
         const row = (name, o, color, fn) => `
-            <div ${fn ? `onclick="${fn}"` : ''} style="background:var(--surface); border-radius:var(--radius); padding:10px 14px; margin-bottom:6px; box-shadow:0 1px 6px rgba(0,0,0,.06); ${fn ? 'cursor:pointer;' : ''}">
+            <div ${fn ? `onclick="${fn}"` : ''} style="background:var(--surface); border-radius:var(--radius); padding:10px 14px; margin-bottom:6px; box-shadow:0 1px 6px rgba(0,0,0,.06); overflow:hidden; ${fn ? 'cursor:pointer;' : ''}">
                 <div style="display:flex; justify-content:space-between; align-items:baseline; gap:8px;">
-                    <div style="font-size:13px; font-weight:700; color:${color || 'var(--text)'};">${name}</div>
-                    <div style="font-size:13px; font-weight:800;">₹${o.amt.toFixed(0)}</div>
+                    <div style="font-size:13px; font-weight:700; color:${color || 'var(--text)'}; min-width:0; word-break:break-word;">${name}</div>
+                    <div style="font-size:13px; font-weight:800; white-space:nowrap;">₹${o.amt.toFixed(0)}</div>
                 </div>
                 <div style="font-size:11px; color:var(--text2); margin-top:2px;">${o.cust.size} customer${o.cust.size === 1 ? '' : 's'} · ${o.inv} invoice${o.inv === 1 ? '' : 's'}</div>
                 <div style="height:4px; border-radius:2px; background:#eee; margin-top:6px; overflow:hidden;"><div style="height:4px; border-radius:2px; width:${Math.min(100, Math.max(2, o.amt / maxAmt * 100))}%; background:${color || '#1565C0'};"></div></div>
             </div>`;
+        const unitRow = r => row(_areaEsc(r.label) + (r.type === 'g' ? ' <span style="font-size:10px; font-weight:700; color:#1565C0;">combined</span>' : ''), r, undefined, "areaDetailOpen('" + _rpEnc(r.key) + "')");
+        let moreBtn = '';
+        if (rest.length) {
+            const rAmt = rest.reduce((s, r) => s + r.amt, 0);
+            moreBtn = `<div onclick="_toggleAreaAll()" style="text-align:center; font-size:12px; font-weight:700; color:var(--text2); cursor:pointer; padding:10px 6px; background:var(--surface); border-radius:var(--radius); margin-bottom:6px; box-shadow:0 1px 6px rgba(0,0,0,.06);">${_areaShowAll ? '▴ Show top ' + TOP + ' only' : '▾ Show ' + rest.length + ' more area' + (rest.length === 1 ? '' : 's') + ' · ₹' + rAmt.toFixed(0)}</div>`;
+        }
         return `${head}
             <div style="margin-bottom:8px;">
                 ${chip(_areaSort === 'amt', 'By amount', "_setAreaSort('amt')")}${chip(_areaSort === 'cust', 'By customers', "_setAreaSort('cust')")}
                 <span onclick="areaOpenManage()" style="cursor:pointer; padding:5px 10px; border-radius:14px; font-size:11px; font-weight:700; margin:0 6px 6px 0; display:inline-block; border:1.5px solid var(--border);">⚙ Manage areas</span>
             </div>
-            ${rows.map(r => row(_areaEsc(r.name), r)).join('') || '<p class="note" style="text-align:center;">No addresses matched an area yet.</p>'}
+            ${shown.map(unitRow).join('') || '<p class="note" style="text-align:center;">No addresses matched an area yet.</p>'}
+            ${moreBtn}
             ${st.unTot.inv ? row('❓ Unassigned — tap to fix', st.unTot, '#E65100', 'areaOpenQueue()') : ''}
-            ${st.noAddr.inv ? row('No address on invoice', st.noAddr, '#888') : ''}
-            <p class="note" style="margin:6px 2px 0;">Customers are counted by mobile number (name if no mobile). Original invoice addresses are never changed.</p>`;
+            ${st.noAddr.inv ? row('No address on invoice', st.noAddr, '#888', "areaDetailOpen('x%3Anoaddr')") : ''}
+            <p class="note" style="margin:6px 2px 0;">Tap an area for its items, top customers and combine options. Customers are counted by name. Combining areas only changes how they are shown — original invoice addresses are never changed.</p>`;
     }
+
+    // ── Area detail popup ──
+    let _areaDetailKey = null;
+    function _areaAnalyze(invs) {
+        const grams = { Gold: 0, Silver: 0 }, items = {}, sizes = {}, designs = {}, custs = {};
+        let billed = 0;
+        invs.forEach(inv => {
+            const t = inv.totals || {}, amt = t.rounded || 0; billed += amt;
+            const taxd = t.taxable || 0, taxAmt = (t.sgst || 0) + (t.cgst || 0) + (t.igst || 0);
+            const frac = taxd > 0 ? (taxAmt / taxd) : (taxRateCfg / 100);
+            const ck = _areaCustKey(inv), nm = String(inv.custName || '').trim();
+            const c = custs[ck] || (custs[ck] = { name: (nm && nm !== '—') ? nm : 'Unnamed customer', inv: 0, amt: 0 });
+            c.inv++; c.amt += amt;
+            (inv.items || []).forEach(item => {
+                const mw = getInvoiceItemPureGrams(item);
+                if (mw) grams[mw.metal] += mw.weight;
+                const pd = (item.barcode && productData[item.barcode]) || {};
+                const name = String(item.itemName || pd.itemName || (item.desc || 'Unnamed Item')).trim();
+                const custom = !!item.isCustom;
+                const metal = custom ? 'Custom' : (mw ? mw.metal : _normMetal(item.metal || pd.metal));
+                const key = metal + '|' + name.toLowerCase();
+                const r = items[key] || (items[key] = { name, metal, qty: 0, weight: 0, value: 0 });
+                const pcs = item.pc || 1;
+                r.qty += pcs; r.weight += item.nlWt || 0;
+                r.value += invTaxableVal(item) * (1 + frac) + (parseFloat(item.hm) || 0);
+                if (!custom) {
+                    const sz = String(item.size || pd.size || '').trim(), ds = String(item.design || pd.design || '').trim();
+                    if (sz) sizes[sz] = (sizes[sz] || 0) + pcs;
+                    if (ds) designs[ds] = (designs[ds] || 0) + pcs;
+                }
+            });
+        });
+        const top = o => Object.keys(o).map(k => ({ k, n: o[k] })).sort((a, b) => b.n - a.n);
+        return { grams, billed, items: Object.values(items), sizes: top(sizes), designs: top(designs),
+            customers: Object.values(custs).sort((a, b) => (b.amt - a.amt) || (b.inv - a.inv)) };
+    }
+    function areaDetailOpen(enc) {
+        _areaDetailKey = decodeURIComponent(enc);
+        areaDetailRender();
+        const p = document.getElementById('area-detail-panel'); if (p) p.scrollTop = 0;
+    }
+    function areaDetailClose() {
+        _areaDetailKey = null;
+        const m = document.getElementById('area-detail-modal'); if (m) m.style.display = 'none';
+    }
+    function areaDetailRender() {
+        const modal = document.getElementById('area-detail-modal'), panel = document.getElementById('area-detail-panel');
+        const u = _areaFindUnit(_areaDetailKey);
+        if (!u || !modal || !panel) { areaDetailClose(); return; }
+        const D = _areaAnalyze(u.invs);
+        const sec = 'font-size:11px; font-weight:800; letter-spacing:.06em; color:var(--text2); text-transform:uppercase; margin:18px 0 8px;';
+        const tile = (l, v, s) => `<div style="background:#F7F7F5; border-radius:10px; padding:9px 11px;"><div style="font-size:11px; color:var(--text2);">${l}</div><div style="font-size:15px; font-weight:800;">${v}</div>${s ? `<div style="font-size:10.5px; color:var(--text2);">${s}</div>` : ''}</div>`;
+        const btn = 'margin:0; padding:9px 12px; border-radius:10px; font-size:12px; font-weight:800; box-shadow:none; width:auto;';
+        let h = `<div style="position:sticky; top:0; z-index:2; background:white; display:flex; align-items:flex-start; justify-content:space-between; gap:10px; padding:16px 16px 12px; border-bottom:1px solid #eee; border-radius:20px 20px 0 0;">
+            <div style="min-width:0;"><div style="font-size:17px; font-weight:800; word-break:break-word;">📍 ${_areaEsc(u.label)}</div>
+            <div style="font-size:12px; color:var(--text2); margin-top:2px;">${u.cust.size} customer${u.cust.size === 1 ? '' : 's'} · ${u.inv} invoice${u.inv === 1 ? '' : 's'}</div></div>
+            <button onclick="areaDetailClose()" aria-label="Close" style="flex:none; width:34px; height:34px; margin:0; padding:0; border:none; border-radius:50%; background:#eee; color:#333; font-size:18px; font-weight:800; line-height:1; box-shadow:none;">✕</button>
+        </div><div style="padding:4px 16px 26px;">`;
+
+        h += `<div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:12px;">
+            ${tile('Total billed', _rpFmt(D.billed))}
+            ${tile('Average per invoice', _rpFmt(u.inv ? D.billed / u.inv : 0))}
+            ${tile('🟡 Gold sold', D.grams.Gold.toFixed(2) + ' g', 'pure grams')}
+            ${tile('⚪ Silver sold', D.grams.Silver.toFixed(2) + ' g', 'pure grams')}
+        </div>`;
+
+        // Combine / decouple
+        if (u.type === 'a' || u.type === 'g') {
+            h += `<div style="${sec}">${u.type === 'g' ? 'Combined areas' : 'Combine with another area'}</div>`;
+            if (u.type === 'g') {
+                h += u.members.map((m, i) => {
+                    const part = u.parts.find(p => p.name === m);
+                    return `<div style="display:flex; align-items:center; justify-content:space-between; gap:8px; padding:7px 0; border-top:1px solid #eee;">
+                        <div style="min-width:0; font-size:13px;"><b>${_areaEsc(m)}</b><div style="font-size:11px; color:var(--text2);">${part ? _rpFmt(part.amt) + ' · ' + part.cust.size + ' customer' + (part.cust.size === 1 ? '' : 's') + ' · ' + part.inv + ' invoice' + (part.inv === 1 ? '' : 's') : 'no sales in this period'}</div></div>
+                        <button onclick="areaGroupRemoveMember(${i})" style="${btn} background:white; border:1.5px solid var(--border); color:var(--text);">Separate</button>
+                    </div>`;
+                }).join('');
+                h += `<button onclick="areaGroupDecouple()" style="${btn} margin-top:8px; background:white; border:1.5px solid #C62828; color:#C62828;">Decouple all</button>`;
+                h += `<div style="font-size:11px; color:var(--text2); margin:12px 0 6px;">Add another area or group to this one:</div>`;
+            } else {
+                h += `<div style="font-size:11px; color:var(--text2); margin-bottom:6px;">Shows both as one tile with their sales added together. You can decouple later — nothing is changed in your data.</div>`;
+            }
+            const others = (window._areaUnitList || []).filter(o => o.key !== u.key).sort((a, b) => b.amt - a.amt);
+            if (others.length) {
+                h += `<div style="display:flex; gap:8px;">
+                    <select id="area-combine-sel" style="flex:1; min-width:0; margin:0;"><option value="">— Choose —</option>${others.map(o => `<option value="${_areaEsc(o.key)}">${_areaEsc(o.label)} · ${_rpFmt(o.amt)}</option>`).join('')}</select>
+                    <button onclick="areaCombine()" style="${btn} background:var(--gold); color:white; border:none;">Combine</button></div>`;
+            } else h += '<div class="note">No other areas to combine with.</div>';
+        }
+
+        // Top customers
+        h += `<div style="${sec}">Top customers</div>`;
+        const tc = D.customers.slice(0, 10);
+        h += tc.length ? tc.map((c, i) => `<div style="display:flex; justify-content:space-between; gap:8px; font-size:13px; padding:6px 0; border-top:1px solid #eee;">
+                <span style="min-width:0; word-break:break-word;"><span style="color:var(--text2); font-weight:800; margin-right:6px;">${i + 1}</span>${_areaEsc(c.name)} <span style="font-size:11px; color:var(--text2);">· ${c.inv} invoice${c.inv === 1 ? '' : 's'}</span></span>
+                <b style="white-space:nowrap;">${_rpFmt(c.amt)}</b></div>`).join('') : '<div class="note">No customers.</div>';
+        if (D.customers.length > 10) h += `<div class="note" style="margin-top:4px;">Showing top 10 of ${D.customers.length} customers.</div>`;
+
+        // Items sold
+        h += `<div style="${sec}">Items sold</div>`;
+        const groups = [['Gold', '🟡 Gold'], ['Silver', '⚪ Silver'], ['Custom', '🧩 Custom items'], ['', 'Other']];
+        let any = false;
+        groups.forEach(([mk, lb]) => {
+            const rows = D.items.filter(r => (r.metal || '') === mk).sort((a, b) => (b.qty - a.qty) || (b.weight - a.weight) || (b.value - a.value));
+            if (!rows.length) return; any = true;
+            h += `<div style="font-size:12px; font-weight:800; margin:10px 0 4px;">${lb}</div>` + rows.map(r => `<div style="display:flex; justify-content:space-between; gap:8px; font-size:12.5px; padding:5px 0; border-top:1px solid #eee;">
+                <span style="min-width:0; word-break:break-word; font-weight:600;">${_areaEsc(r.name)}</span>
+                <span style="text-align:right; color:var(--text2); white-space:nowrap;">${r.qty} pc${r.qty === 1 ? '' : 's'} · ${r.weight > 0 ? r.weight.toFixed(2) + 'g · ' : ''}${_rpFmt(r.value)}</span></div>`).join('');
+        });
+        if (!any) h += '<div class="note">No items.</div>';
+
+        // Sizes and designs
+        const chips = list => list.slice(0, 8).map(x => `<span style="display:inline-block; margin:0 6px 6px 0; padding:4px 10px; border-radius:14px; background:#F1F8F2; font-size:12px; font-weight:600;">${_areaEsc(x.k)} <b>${x.n}</b></span>`).join('');
+        if (D.sizes.length) h += `<div style="${sec}">Top sizes <span style="text-transform:none; font-weight:600;">(pieces)</span></div>${chips(D.sizes)}`;
+        if (D.designs.length) h += `<div style="${sec}">Top designs <span style="text-transform:none; font-weight:600;">(pieces)</span></div>${chips(D.designs)}`;
+
+        h += '<div class="note" style="margin-top:14px;">Values include tax. Grams are pure (24K/999) equivalent. Customers are matched by name.</div></div>';
+        panel.innerHTML = h;
+        modal.style.display = 'flex';
+    }
+    async function areaCombine() {
+        const u = _areaFindUnit(_areaDetailKey), sel = document.getElementById('area-combine-sel');
+        if (!u || !sel || !sel.value) { showCustomAlert('Choose an area to combine with.'); return; }
+        const o = _areaFindUnit(sel.value); if (!o) return;
+        const members = [];
+        [u, o].forEach(x => x.members.forEach(m => { if (members.indexOf(m) < 0) members.push(m); }));
+        const gids = [u, o].filter(x => x.type === 'g').map(x => x.gid);
+        const target = gids[0] || crypto.randomUUID();
+        const upd = {};
+        gids.slice(1).forEach(id => { upd[id] = null; });
+        upd[target] = { id: target, members, ts: Date.now() };
+        if (await _areaGroupWrite(upd)) { _areaDetailKey = 'g:' + target; renderSalesReport(); }
+    }
+    async function areaGroupRemoveMember(i) {
+        const u = _areaFindUnit(_areaDetailKey); if (!u || u.type !== 'g') return;
+        const remaining = u.members.filter((m, idx) => idx !== i);
+        const upd = {};
+        upd[u.gid] = remaining.length < 2 ? null : { id: u.gid, members: remaining, ts: Date.now() };
+        if (!(await _areaGroupWrite(upd))) return;
+        if (remaining.length < 2) areaDetailClose();
+        renderSalesReport();
+    }
+    async function areaGroupDecouple() {
+        const u = _areaFindUnit(_areaDetailKey); if (!u || u.type !== 'g') return;
+        if (!(await _areaGroupWrite({ [u.gid]: null }))) return;
+        areaDetailClose();
+        renderSalesReport();
+    }
+    document.addEventListener('keydown', e => { if (e.key === 'Escape' && _areaDetailKey) areaDetailClose(); });
+
     async function _areaWrite(upd) {
         try {
             await window.dbUpdate(window.dbRef(window.firebaseDB, 'areaAliases'), upd);
@@ -2659,6 +2874,13 @@ function computeCombinedAvgRate(metal){
         upd[areaNorm(finalName)] = { area: finalName, ts };
         if (!(await _areaWrite(upd))) return;
         Object.keys(upd).forEach(k => { areaAliases[k] = upd[k]; });
+        const gupd = {};
+        areaGroups.forEach(g => {
+            if (g.members.indexOf(old) < 0) return;
+            const nm = []; g.members.forEach(m => { const x = m === old ? finalName : m; if (nm.indexOf(x) < 0) nm.push(x); });
+            gupd[g.id] = nm.length < 2 ? null : { id: g.id, members: nm, ts: Date.now() };
+        });
+        if (Object.keys(gupd).length) await _areaGroupWrite(gupd);
         renderSalesReport(); areaOpenManage();
     }
 
@@ -2962,6 +3184,7 @@ function computeCombinedAvgRate(metal){
             ${_bsExpanded ? _bestSellersHtml(bsRows) : ''}
             ${_areaSectionHtml(_areaStats)}
         `;
+        if (_areaDetailKey) areaDetailRender();
     }
 
     // ═══════════════════════════════════════════════════════════════════
