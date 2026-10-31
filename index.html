@@ -189,6 +189,10 @@
             max-height: 88vh; overflow-y: auto;
         }
         #pm-alert-modal { z-index: 1170; }
+        #purchase-panel > div:first-child, #payment-panel > div:first-child, #manual-owed-panel > div:first-child, #piece-bill-panel > div:first-child {
+            position: sticky; top: 0; z-index: 3; background: white;
+            margin-top: -22px; margin-left: -20px; margin-right: -20px; padding: 16px 20px 10px;
+        }
         button { cursor: pointer; }
         /* ── Purchase Manager UI refresh ── */
         html, body { background: #1a1a1a !important; overscroll-behavior: none; }
@@ -581,7 +585,10 @@
 
 <div id="pm-alert-modal">
     <div id="pm-alert-panel" style="text-align:center;">
-        <h3 id="pm-alert-title" style="margin:0 0 10px; font-size:18px; color:#1a1a1a;">Alert</h3>
+        <div style="position:sticky; top:0; z-index:3; background:white; margin:-22px -20px 10px; padding:16px 54px 10px; text-align:center;">
+            <h3 id="pm-alert-title" style="margin:0; font-size:18px; color:#1a1a1a;">Alert</h3>
+            <button onclick="_pmAlertX()" aria-label="Close" style="position:absolute; top:10px; right:12px; width:34px; height:34px; margin:0; padding:0; border:none; border-radius:50%; background:#eee; color:#333; font-size:16px; font-weight:800; line-height:1; box-shadow:none;">✕</button>
+        </div>
         <p id="pm-alert-message" style="margin:0 0 20px; font-size:14px; color:#333;"></p>
         <div id="pm-alert-actions" style="display:flex; gap:10px;"></div>
     </div>
@@ -609,6 +616,12 @@
     }
     function _pmExecuteConfirm() {
         if (typeof _pmConfirmCallback === 'function') _pmConfirmCallback();
+        _pmConfirmCallback = null;
+        closePmAlert();
+    }
+    // Top-right ✕ on the dialog: acts as Cancel when a yes/no question is waiting, otherwise just closes.
+    function _pmAlertX() {
+        if (window._pmAskRes) { _pmAskDone(false); return; }
         _pmConfirmCallback = null;
         closePmAlert();
     }
