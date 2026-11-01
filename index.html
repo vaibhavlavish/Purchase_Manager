@@ -2665,7 +2665,15 @@ function computeCombinedAvgRate(metal){
         }
     }
 
-    let _areaSectionOpen = false, _areaSort = 'amt', _areaShowAll = false;
+    let _areaSectionOpen = false, _areaSort = 'amt', _areaShowAll = false, _areaQuery = '';
+    // Search box: re-draws only the area rows (not the whole report) so typing keeps focus
+    function _areaSearch(v) {
+        _areaQuery = v || '';
+        const el = document.getElementById('area-rows');
+        if (el && window._areaRowsFn) el.innerHTML = window._areaRowsFn();
+        const x = document.getElementById('area-q-clear'); if (x) x.style.display = _areaQuery ? 'block' : 'none';
+    }
+    function _areaSearchClear() { const i = document.getElementById('area-q'); if (i) { i.value = ''; i.focus(); } _areaSearch(''); }
     function _toggleAreaSection() { _areaSectionOpen = !_areaSectionOpen; renderSalesReport(); }
     function _setAreaSort(m) { _areaSort = m; renderSalesReport(); }
     function _toggleAreaAll() { _areaShowAll = !_areaShowAll; renderSalesReport(); }
@@ -2700,15 +2708,31 @@ function computeCombinedAvgRate(metal){
             const rAmt = rest.reduce((s, r) => s + r.amt, 0);
             moreBtn = `<div onclick="_toggleAreaAll()" style="text-align:center; font-size:12px; font-weight:700; color:var(--text2); cursor:pointer; padding:10px 6px; background:var(--surface); border-radius:var(--radius); margin-bottom:6px; box-shadow:0 1px 6px rgba(0,0,0,.06);">${_areaShowAll ? '▴ Show top ' + TOP + ' only' : '▾ Show ' + rest.length + ' more area' + (rest.length === 1 ? '' : 's') + ' · ₹' + rAmt.toFixed(0)}</div>`;
         }
+        // Rows below the search box. With a search term: every matching area (a combined area also matches on any of its
+        // member names); without one: the usual top-10 / show-all view plus the Unassigned and No-address tiles.
+        const rowsFn = () => {
+            const q = _areaQuery.trim().toLowerCase();
+            if (q) {
+                const hits = units.filter(r => (r.label + ' ' + (r.members || []).join(' ')).toLowerCase().includes(q));
+                if (!hits.length) return `<p class="note" style="text-align:center;">No area matches “${_areaEsc(_areaQuery.trim())}”.</p>`;
+                const tot = hits.reduce((a, r) => a + r.amt, 0);
+                return `<div class="note" style="margin:0 2px 6px;">${hits.length} area${hits.length === 1 ? '' : 's'} match · ₹${tot.toFixed(0)}</div>` + hits.map(unitRow).join('');
+            }
+            return (shown.map(unitRow).join('') || '<p class="note" style="text-align:center;">No addresses matched an area yet.</p>') + moreBtn +
+                (st.unTot.inv ? row('❓ Unassigned — tap to fix', st.unTot, '#E65100', 'areaOpenQueue()') : '') +
+                (st.noAddr.inv ? row('No address on invoice', st.noAddr, '#888', "areaDetailOpen('x%3Anoaddr')") : '');
+        };
+        window._areaRowsFn = rowsFn;
         return `${head}
             <div style="margin-bottom:8px;">
                 ${chip(_areaSort === 'amt', 'By amount', "_setAreaSort('amt')")}${chip(_areaSort === 'cust', 'By customers', "_setAreaSort('cust')")}
                 <span onclick="areaOpenManage()" style="cursor:pointer; padding:5px 10px; border-radius:14px; font-size:11px; font-weight:700; margin:0 6px 6px 0; display:inline-block; border:1.5px solid var(--border);">⚙ Manage areas</span>
             </div>
-            ${shown.map(unitRow).join('') || '<p class="note" style="text-align:center;">No addresses matched an area yet.</p>'}
-            ${moreBtn}
-            ${st.unTot.inv ? row('❓ Unassigned — tap to fix', st.unTot, '#E65100', 'areaOpenQueue()') : ''}
-            ${st.noAddr.inv ? row('No address on invoice', st.noAddr, '#888', "areaDetailOpen('x%3Anoaddr')") : ''}
+            <div style="position:relative; margin-bottom:8px;">
+                <input id="area-q" type="text" enterkeyhint="search" autocomplete="off" autocapitalize="off" placeholder="🔍 Search area…" value="${_areaEsc(_areaQuery)}" oninput="_areaSearch(this.value)" style="margin:0; padding:10px 36px 10px 12px; font-size:14px;">
+                <span id="area-q-clear" onclick="_areaSearchClear()" style="display:${_areaQuery ? 'block' : 'none'}; position:absolute; right:6px; top:50%; transform:translateY(-50%); cursor:pointer; font-size:16px; color:var(--text2); padding:6px 8px;">✕</span>
+            </div>
+            <div id="area-rows">${rowsFn()}</div>
             <p class="note" style="margin:6px 2px 0;">Tap an area for its items, top customers and combine options. Customers are counted by name. Combining areas only changes how they are shown — original invoice addresses are never changed.</p>`;
     }
 
