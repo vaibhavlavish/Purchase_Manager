@@ -2750,7 +2750,8 @@ function computeCombinedAvgRate(metal){
             c.inv++; c.amt += amt;
             (inv.items || []).forEach(item => {
                 const mw = getInvoiceItemPureGrams(item);
-                if (mw) grams[mw.metal] += mw.weight;
+                const _w = (_salesWtMode === 'fine' && mw) ? mw.weight : (item.nlWt || 0);   // follows the Sales tab Weight / Fine toggle
+                if (mw) grams[mw.metal] += _w;
                 const pd = (item.barcode && productData[item.barcode]) || {};
                 const name = String(item.itemName || pd.itemName || (item.desc || 'Unnamed Item')).trim();
                 const custom = !!item.isCustom;
@@ -2758,7 +2759,7 @@ function computeCombinedAvgRate(metal){
                 const key = metal + '|' + name.toLowerCase();
                 const r = items[key] || (items[key] = { name, metal, qty: 0, weight: 0, value: 0 });
                 const pcs = item.pc || 1;
-                r.qty += pcs; r.weight += item.nlWt || 0;
+                r.qty += pcs; r.weight += _w;
                 r.value += invTaxableVal(item) * (1 + frac) + (parseFloat(item.hm) || 0);
                 if (!custom) {
                     const sz = String(item.size || pd.size || '').trim(), ds = String(item.design || pd.design || '').trim();
@@ -2797,8 +2798,8 @@ function computeCombinedAvgRate(metal){
         h += `<div style="display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; margin-top:12px;">
             ${tile('Total billed', _rpFmt(D.billed))}
             ${tile('Average per invoice', _rpFmt(u.inv ? D.billed / u.inv : 0))}
-            ${tile('🟡 Gold sold', D.grams.Gold.toFixed(2) + ' g', 'pure grams')}
-            ${tile('⚪ Silver sold', D.grams.Silver.toFixed(2) + ' g', 'pure grams')}
+            ${tile('🟡 Gold sold', D.grams.Gold.toFixed(2) + ' g', _salesWtMode === 'fine' ? 'pure grams' : 'actual weight')}
+            ${tile('⚪ Silver sold', D.grams.Silver.toFixed(2) + ' g', _salesWtMode === 'fine' ? 'pure grams' : 'actual weight')}
         </div>`;
 
         // Combine / decouple
@@ -2851,7 +2852,7 @@ function computeCombinedAvgRate(metal){
         if (D.sizes.length) h += `<div style="${sec}">Top sizes <span style="text-transform:none; font-weight:600;">(pieces)</span></div>${chips(D.sizes)}`;
         if (D.designs.length) h += `<div style="${sec}">Top designs <span style="text-transform:none; font-weight:600;">(pieces)</span></div>${chips(D.designs)}`;
 
-        h += '<div class="note" style="margin-top:14px;">Values include tax. Grams are pure (24K/999) equivalent. Customers are matched by name.</div></div>';
+        h += '<div class="note" style="margin-top:14px;">Values include tax. ' + (_salesWtMode === 'fine' ? 'Grams are pure (24K/999) equivalent.' : 'Grams are the actual item (net) weight.') + ' Customers are matched by name.</div></div>';
         panel.innerHTML = h;
         modal.style.display = 'flex';
     }
@@ -3137,6 +3138,9 @@ function computeCombinedAvgRate(metal){
             (inv.items || []).forEach(item => {
                 const mw = getInvoiceItemPureGrams(item);
                 const metal = mw ? mw.metal : '';
+                // One weight for every figure on this page (item list, stamp headers, tag rows, best sellers):
+                // Fine → pure metal (net × stamp purity); Weight → the item's own net weight.
+                const _itemW = (_salesWtMode === 'fine' && mw) ? mw.weight : (item.nlWt || 0);
                 const stamp = item.stamp
                     || (item.barcode && productData[item.barcode] && productData[item.barcode].stamp)
                     || '';
@@ -3159,20 +3163,20 @@ function computeCombinedAvgRate(metal){
                 const _pd = (item.barcode && productData[item.barcode]) || {};
                 itemStats[key].tags.push({
                     tag: item.barcode || '',
-                    weight: item.nlWt || 0,
+                    weight: _itemW,
                     size: item.size || _pd.size || '',
                     design: item.design || _pd.design || '',
                     price: invTaxableVal(item) * (1 + invTaxFrac) + (parseFloat(item.hm) || 0)
                 });
                 if (!isCustom) {
                     bsRows.push({
-                        name: actualName, metal: metal || '', qty: (item.pc || 1), weight: (item.nlWt || 0),
+                        name: actualName, metal: metal || '', qty: (item.pc || 1), weight: _itemW,
                         size: item.size || _pd.size || '', design: item.design || _pd.design || '',
                         value: invTaxableVal(item) * (1 + invTaxFrac) + (parseFloat(item.hm) || 0)
                     });
                 }
                 itemStats[key].qty += (item.pc || 1);
-                itemStats[key].weight += (item.nlWt || 0);
+                itemStats[key].weight += _itemW;
                 // Tax-inclusive: taxable value + GST, plus any H/M (hallmark) charge, which is untaxed
                 itemStats[key].value += invTaxableVal(item) * (1 + invTaxFrac) + (parseFloat(item.hm) || 0);
             });
