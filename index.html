@@ -3005,6 +3005,9 @@ function computeCombinedAvgRate(metal){
         _salesReportExpandedItems[k] = !_salesReportExpandedItems[k];
         renderSalesReport();
     }
+    // Sales tab metal tiles: 'weight' = actual net weight of the pieces sold, 'fine' = pure metal (net × stamp purity)
+    let _salesWtMode = 'weight';
+    function _setSalesWtMode(m){ _salesWtMode = (m === 'fine') ? 'fine' : 'weight'; renderSalesReport(); }
     let _salesReportMetalCardExpanded = null;
     function _toggleSalesReportMetalCard(metal){
         _salesReportMetalCardExpanded = (_salesReportMetalCardExpanded === metal) ? null : metal;
@@ -3108,6 +3111,8 @@ function computeCombinedAvgRate(metal){
         let cashTotal = 0, upiTotal = 0, cardTotal = 0;
         const grams = { Gold: 0, Silver: 0 };
         const gramsByStamp = { Gold: {}, Silver: {} };
+        const gramsRaw = { Gold: 0, Silver: 0 };            // actual net weight sold (no purity applied)
+        const gramsRawByStamp = { Gold: {}, Silver: {} };
         const itemStats = {};
         const bsRows = [];   // one entry per sold line, for the Size & Design best-sellers view
 
@@ -3139,6 +3144,9 @@ function computeCombinedAvgRate(metal){
                     grams[mw.metal] += mw.weight;
                     const stampKey = stamp || 'Unstamped';
                     gramsByStamp[mw.metal][stampKey] = (gramsByStamp[mw.metal][stampKey] || 0) + mw.weight;
+                    const _rw = item.nlWt || 0;
+                    gramsRaw[mw.metal] += _rw;
+                    gramsRawByStamp[mw.metal][stampKey] = (gramsRawByStamp[mw.metal][stampKey] || 0) + _rw;
                 }
 
                 const actualName = item.itemName
@@ -3188,16 +3196,19 @@ function computeCombinedAvgRate(metal){
             </div>`;
 
         const metalCard = (metal, icon) => {
-            const clickable = grams[metal] > 0;
+            const fine = _salesWtMode === 'fine';
+            const tot = fine ? grams[metal] : gramsRaw[metal];
+            const clickable = tot > 0;
             const expanded = _salesReportMetalCardExpanded === metal;
-            const entries = Object.entries(gramsByStamp[metal]).sort((a, b) => b[1] - a[1]);
+            const entries = Object.entries((fine ? gramsByStamp : gramsRawByStamp)[metal]).sort((a, b) => b[1] - a[1]);
             return `
                 <div onclick="${clickable ? `_toggleSalesReportMetalCard('${metal}')` : ''}" style="background:var(--surface); border-radius:var(--radius); padding:14px; box-shadow:0 1px 6px rgba(0,0,0,.06); ${clickable ? 'cursor:pointer;' : ''}">
                     <div style="display:flex; justify-content:space-between; align-items:center;">
                         <div style="font-size:10px; font-weight:700; letter-spacing:.08em; color:var(--text2); text-transform:uppercase;">${icon} ${metal} Sold</div>
                         ${clickable ? `<span style="font-size:11px; color:var(--text2);">${expanded ? '▾' : '▸'}</span>` : ''}
                     </div>
-                    <div style="font-size:18px; font-weight:800; color:var(--text); margin-top:6px;">${grams[metal].toFixed(2)}g</div>
+                    <div style="font-size:18px; font-weight:800; color:var(--text); margin-top:6px;">${tot.toFixed(2)}g</div>
+                    <div style="font-size:10.5px; color:var(--text2); margin-top:2px;">${fine ? 'fine (pure metal)' : 'actual weight'}</div>
                     ${expanded ? `
                         <div style="margin-top:10px; padding-top:10px; border-top:1px solid var(--border);">
                             ${entries.map(([st, g]) => `<div style="display:flex; justify-content:space-between; font-size:12px; padding:2px 0;"><span style="color:var(--text2);">${st}</span><span style="font-weight:700;">${g.toFixed(2)}g</span></div>`).join('')}
@@ -3274,6 +3285,10 @@ function computeCombinedAvgRate(metal){
                 ${card('Cash', '₹' + cashTotal.toFixed(2))}
                 ${card('UPI', '₹' + upiTotal.toFixed(2))}
                 ${card('Card', '₹' + cardTotal.toFixed(2))}
+            </div>
+            <div style="display:flex; gap:4px; margin-top:10px; padding:3px; background:var(--surface); border-radius:10px; box-shadow:0 1px 6px rgba(0,0,0,.06);">
+                <span onclick="_setSalesWtMode('weight')" style="flex:1; text-align:center; padding:7px 0; font-size:12px; font-weight:800; cursor:pointer; border-radius:8px; ${_salesWtMode === 'weight' ? 'background:var(--green, #2E7D32); color:#fff;' : 'color:var(--text2);'}">Weight</span>
+                <span onclick="_setSalesWtMode('fine')" style="flex:1; text-align:center; padding:7px 0; font-size:12px; font-weight:800; cursor:pointer; border-radius:8px; ${_salesWtMode === 'fine' ? 'background:var(--green, #2E7D32); color:#fff;' : 'color:var(--text2);'}">Fine</span>
             </div>
             <div style="display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; margin-top:10px;">
                 ${metalCard('Gold', '🟡')}
