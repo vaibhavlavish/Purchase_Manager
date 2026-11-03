@@ -195,14 +195,14 @@
         #purchase-panel, #payment-panel, #manual-owed-panel, #piece-bill-panel, #pm-alert-panel {
             background: white; border-radius: 20px 20px 0 0;
             width: 100%; max-width: 480px;
-            padding: 22px 20px 30px;
+            padding: 0 20px 30px;
             box-shadow: 0 -8px 32px rgba(0,0,0,0.15);
             max-height: 88vh; overflow-y: auto;
         }
         #pm-alert-modal { z-index: 1170; }
         #purchase-panel > div:first-child, #payment-panel > div:first-child, #manual-owed-panel > div:first-child, #piece-bill-panel > div:first-child {
             position: sticky; top: 0; z-index: 3; background: white;
-            margin-top: -22px; margin-left: -20px; margin-right: -20px; padding: 16px 20px 10px;
+            margin-top: 0; margin-left: -20px; margin-right: -20px; padding: 22px 20px 10px;
         }
         button { cursor: pointer; }
         /* ── Purchase Manager UI refresh ── */
@@ -596,7 +596,7 @@
 
 <div id="pm-alert-modal">
     <div id="pm-alert-panel" style="text-align:center;">
-        <div style="position:sticky; top:0; z-index:3; background:white; margin:-22px -20px 10px; padding:16px 54px 10px; text-align:center;">
+        <div style="position:sticky; top:0; z-index:3; background:white; margin:0 -20px 10px; padding:22px 54px 10px; text-align:center;">
             <h3 id="pm-alert-title" style="margin:0; font-size:18px; color:#1a1a1a;">Alert</h3>
             <button onclick="_pmAlertX()" aria-label="Close" style="position:absolute; top:10px; right:12px; width:34px; height:34px; margin:0; padding:0; border:none; border-radius:50%; background:#eee; color:#333; font-size:16px; font-weight:800; line-height:1; box-shadow:none;">✕</button>
         </div>
