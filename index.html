@@ -923,6 +923,9 @@
             _pmRerenderSoon();
         }, err => console.error('[SalesHedgeDates] read error', err));
     }
+    // Custom-item categories (set in the POS; stored on each invoice row as customCategory)
+    const _CI_CATS = [['gold', 'Gold'], ['silver', 'Silver'], ['1g', '1G'], ['', 'Uncategorised']];
+    function _ciCat(item){ const c = String((item && item.customCategory) || '').toLowerCase(); return (c === 'gold' || c === 'silver' || c === '1g') ? c : ''; }
     function getSalesHedgeStartDate(track){
         const stored = salesHedgeStartDates[track];
         return stored ? new Date(stored + 'T00:00:00') : SALES_HEDGE_START_DATE;
@@ -2773,7 +2776,7 @@ function computeCombinedAvgRate(metal){
                 const pd = (item.barcode && productData[item.barcode]) || {};
                 const name = String(item.itemName || pd.itemName || (item.desc || 'Unnamed Item')).trim();
                 const custom = !!item.isCustom;
-                const metal = custom ? 'Custom' : (mw ? mw.metal : _normMetal(item.metal || pd.metal));
+                const metal = custom ? ('Custom:' + _ciCat(item)) : (mw ? mw.metal : _normMetal(item.metal || pd.metal));
                 const key = metal + '|' + name.toLowerCase();
                 const r = items[key] || (items[key] = { name, metal, qty: 0, weight: 0, value: 0 });
                 const pcs = item.pc || 1;
@@ -2854,12 +2857,14 @@ function computeCombinedAvgRate(metal){
 
         // Items sold
         h += `<div style="${sec}">Items sold</div>`;
-        const groups = [['Gold', '🟡 Gold'], ['Silver', '⚪ Silver'], ['Custom', '🧩 Custom items'], ['', 'Other']];
+        const groups = [['Gold', '🟡 Gold'], ['Silver', '⚪ Silver'], ..._CI_CATS.map(([k, l]) => ['Custom:' + k, '🧩 Custom · ' + l]), ['', 'Other']];
         let any = false;
         groups.forEach(([mk, lb]) => {
             const rows = D.items.filter(r => (r.metal || '') === mk).sort((a, b) => (b.qty - a.qty) || (b.weight - a.weight) || (b.value - a.value));
             if (!rows.length) return; any = true;
-            h += `<div style="font-size:12px; font-weight:800; margin:10px 0 4px;">${lb}</div>` + rows.map(r => `<div style="display:flex; justify-content:space-between; gap:8px; font-size:12.5px; padding:5px 0; border-top:1px solid #eee;">
+            const _gt = rows.reduce((a, r) => ({ q: a.q + r.qty, w: a.w + r.weight, v: a.v + r.value }), { q: 0, w: 0, v: 0 });
+            const _gtHtml = mk.indexOf('Custom:') === 0 ? `<span style="font-weight:600; color:var(--text2); font-size:11.5px;">${_gt.q} pc${_gt.q === 1 ? '' : 's'} · ${_gt.w > 0 ? _gt.w.toFixed(2) + 'g · ' : ''}${_rpFmt(_gt.v)}</span>` : '';
+            h += `<div style="display:flex; justify-content:space-between; gap:8px; font-size:12px; font-weight:800; margin:10px 0 4px;"><span>${lb}</span>${_gtHtml}</div>` + rows.map(r => `<div style="display:flex; justify-content:space-between; gap:8px; font-size:12.5px; padding:5px 0; border-top:1px solid #eee;">
                 <span style="min-width:0; word-break:break-word; font-weight:600;">${_areaEsc(r.name)}</span>
                 <span style="text-align:right; color:var(--text2); white-space:nowrap;">${r.qty} pc${r.qty === 1 ? '' : 's'} · ${r.weight > 0 ? r.weight.toFixed(2) + 'g · ' : ''}${_rpFmt(r.value)}</span></div>`).join('');
         });
@@ -3176,8 +3181,8 @@ function computeCombinedAvgRate(metal){
                     || (item.desc || 'Unnamed Item').trim();
                 // Custom items get their own section in the item-wise list (not "Other")
                 const isCustom = !!item.isCustom;
-                const key = isCustom ? ('custom||' + actualName) : (metal + '|' + stamp + '|' + actualName);
-                if (!itemStats[key]) itemStats[key] = { key: key, name: actualName, metal: isCustom ? '' : metal, stamp: isCustom ? '' : stamp, custom: isCustom, qty: 0, weight: 0, value: 0, tags: [] };
+                const key = isCustom ? ('custom|' + _ciCat(item) + '|' + actualName) : (metal + '|' + stamp + '|' + actualName);
+                if (!itemStats[key]) itemStats[key] = { key: key, name: actualName, metal: isCustom ? '' : metal, stamp: isCustom ? '' : stamp, custom: isCustom, cat: isCustom ? _ciCat(item) : '', qty: 0, weight: 0, value: 0, tags: [] };
                 const _pd = (item.barcode && productData[item.barcode]) || {};
                 itemStats[key].tags.push({
                     tag: item.barcode || '',
@@ -3262,14 +3267,16 @@ function computeCombinedAvgRate(metal){
                 </div>${detail}`;
         };
 
-        const groupOrder = [['Gold', '🟡 Gold'], ['Silver', '⚪ Silver'], ['__custom', '🧩 Custom Items'], ['', 'Other']];
+        const groupOrder = [['Gold', '🟡 Gold'], ['Silver', '⚪ Silver'], ..._CI_CATS.map(([k, l]) => ['__custom:' + k, '🧩 Custom · ' + l]), ['', 'Other']];
         const itemSectionsHtml = groupOrder.map(([metalKey, label]) => {
-            const rows = Object.values(itemStats).filter(s => metalKey === '__custom' ? s.custom : (!s.custom && s.metal === metalKey));
+            const rows = Object.values(itemStats).filter(s => metalKey.indexOf('__custom:') === 0 ? (s.custom && ('__custom:' + s.cat) === metalKey) : (!s.custom && s.metal === metalKey));
             if (!rows.length) return '';
 
-            if (!metalKey || metalKey === '__custom') {
+            if (!metalKey || metalKey.indexOf('__custom:') === 0) {
+                const _ct = rows.reduce((a, r) => ({ q: a.q + r.qty, w: a.w + r.weight, v: a.v + r.value }), { q: 0, w: 0, v: 0 });
+                const _totHtml = metalKey ? `<span style="font-size:11px; font-weight:600; color:var(--text2);">${_ct.q} pc${_ct.q === 1 ? '' : 's'} · ${_ct.w > 0 ? _ct.w.toFixed(2) + 'g · ' : ''}₹${_ct.v.toFixed(2)}</span>` : '';
                 return `
-                    <div style="font-size:11px; font-weight:800; color:var(--text); margin:12px 0 6px;">${label}</div>
+                    <div style="display:flex; justify-content:space-between; align-items:center; font-size:11px; font-weight:800; color:var(--text); margin:12px 0 6px;"><span>${label}</span>${_totHtml}</div>
                     ${rows.sort((a, b) => (b.qty - a.qty) || (b.weight - a.weight) || (b.value - a.value)).map(itemRowHtml).join('')}`;
             }
 
