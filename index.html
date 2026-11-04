@@ -1157,8 +1157,12 @@ function computeCombinedAvgRate(metal){
             return r ? { rate: r, label: `Track ${track}` } : null;
         }
 
+        // Purchases/payments before the track's "Count sales since" date are left out, so both
+        // sides of the P&L cover the same window (plan-linked purchases follow their plan instead).
+        const inWindow = x => x.planId || !(new Date(x.createdAt) < getSalesHedgeStartDate(x.track));
         purchases.forEach(p => {
             if (!(p.status === 'paid' || _pmFixed(p)) || !p.rate) return;
+            if (!inWindow(p)) return;
             const booked = bookedRateFor(p.track, p.planId, p.metal);
             if (!booked) return;
             const pnl = (booked.rate - p.rate) * (p.weight || 0);
@@ -1167,6 +1171,7 @@ function computeCombinedAvgRate(metal){
         });
         payments.forEach(pay => {
             if (!pay.rate) return;
+            if (!inWindow(pay)) return;
             const booked = bookedRateFor(pay.track, null, pay.metal);
             if (!booked) return;
             const pnl = (booked.rate - pay.rate) * (pay.weight || 0);
@@ -1279,6 +1284,18 @@ function computeCombinedAvgRate(metal){
                     ${icon} ${metal} <span style="opacity:.75;">(${count})</span>
                 </button>`;
             const pnlColor = activeTotal >= 0 ? '#2E7D32' : '#C62828';
+            // Weighted averages over the rows shown: what we paid per gram vs the rate sold at
+            const _aw = activeRows.reduce((a, r) => a + (r.weight || 0), 0);
+            const _avgBuy = _aw > 0 ? activeRows.reduce((a, r) => a + (r.weight || 0) * r.rate, 0) / _aw : 0;
+            const _avgSell = _aw > 0 ? activeRows.reduce((a, r) => a + (r.weight || 0) * r.bookedRate, 0) / _aw : 0;
+            const _spread = _avgSell - _avgBuy;
+            const _avgHtml = _aw > 0 ? `
+                <div style="display:flex; gap:6px; margin-bottom:10px;">
+                    <div style="flex:1; background:#F7F7F5; border-radius:10px; padding:8px 10px;"><div style="font-size:10px; color:var(--text2);">Avg purchase</div><div style="font-size:14px; font-weight:800;">₹${_avgBuy.toFixed(2)}/g</div></div>
+                    <div style="flex:1; background:#F7F7F5; border-radius:10px; padding:8px 10px;"><div style="font-size:10px; color:var(--text2);">Avg sales</div><div style="font-size:14px; font-weight:800;">₹${_avgSell.toFixed(2)}/g</div></div>
+                    <div style="flex:1; background:#F7F7F5; border-radius:10px; padding:8px 10px;"><div style="font-size:10px; color:var(--text2);">Difference</div><div style="font-size:14px; font-weight:800; color:${_spread >= 0 ? '#2E7D32' : '#C62828'};">${_spread >= 0 ? '+' : ''}₹${_spread.toFixed(2)}/g</div></div>
+                </div>
+                <div style="font-size:10.5px; color:var(--text2); margin-bottom:8px;">${_aw.toFixed(2)}g purchased since ${getSalesHedgeStartDate(currentInvTrack).toISOString().slice(0, 10)}</div>` : '';
             pnlEl.innerHTML = `
                 <div style="font-size:10px; font-weight:700; letter-spacing:.08em; color:var(--text2); text-transform:uppercase; margin-bottom:10px;">Purchase P&L</div>
                 <div style="display:flex; gap:6px; margin-bottom:10px;">
@@ -1288,6 +1305,7 @@ function computeCombinedAvgRate(metal){
                 <div style="display:flex; justify-content:flex-end; align-items:center; margin-bottom:10px;">
                     <div style="font-size:18px; font-weight:800; color:${pnlColor};">${activeTotal >= 0 ? '+' : ''}₹${activeTotal.toFixed(2)}</div>
                 </div>
+                ${_avgHtml}
                 ${activeRows.length ? activeRows.map(r => `
                     <div style="display:flex; justify-content:space-between; font-size:12px; padding:4px 0; border-top:1px solid var(--border);">
                         <span style="color:var(--text2);">${r.label} · ${r.weight.toFixed(2)}g<br><span style="font-size:10.5px;">Paid ₹${r.rate.toFixed(2)}/g vs booked ₹${r.bookedRate.toFixed(2)}/g</span></span>
