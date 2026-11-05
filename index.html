@@ -343,6 +343,7 @@
                     <button onclick="rpQuick('7')" style="flex:1; padding:7px; font-size:12px; font-weight:700; border:1.5px solid var(--border); border-radius:8px; background:white; color:var(--text);">7 days</button>
                     <button onclick="rpQuick('month')" style="flex:1; padding:7px; font-size:12px; font-weight:700; border:1.5px solid var(--border); border-radius:8px; background:white; color:var(--text);">This month</button>
                     <button onclick="rpQuick('last')" style="flex:1; padding:7px; font-size:12px; font-weight:700; border:1.5px solid var(--border); border-radius:8px; background:white; color:var(--text);">Last month</button>
+                    <button onclick="rpQuick('all')" style="flex:1; padding:7px; font-size:12px; font-weight:700; border:1.5px solid var(--border); border-radius:8px; background:white; color:var(--text);">All time</button>
                 </div>
             </div>
             <div id="rp-body"></div>
@@ -2186,13 +2187,22 @@ function computeCombinedAvgRate(metal){
         document.getElementById('rp-to').value = _rpRange.to;
     }
     function rpSetDates(){
+        _rpRange.all = false;
         _rpRange.from = document.getElementById('rp-from').value;
         _rpRange.to = document.getElementById('rp-to').value;
         renderReportTab();
     }
     function rpQuick(k){
         const now = new Date(); let f, t = now;
-        if (k === 'month') f = new Date(now.getFullYear(), now.getMonth(), 1);
+        _rpRange.all = (k === 'all');
+        if (k === 'all') {
+            // earliest Track B cash-book entry or invoice, through today
+            let min = _rpDate(now);
+            _pmCashSrc().forEach(e => { if (_rpTrackOk(e.track || 'A') && e.date && e.date < min) min = e.date; });
+            _pmSalesSrc().forEach(inv => { if (inv.draft || !_rpTrackOk(inv.track)) return; const d = new Date(inv.timestamp); if (!isNaN(d) && _rpDate(d) < min) min = _rpDate(d); });
+            f = new Date(min + 'T12:00:00');
+        }
+        else if (k === 'month') f = new Date(now.getFullYear(), now.getMonth(), 1);
         else if (k === 'last') { f = new Date(now.getFullYear(), now.getMonth() - 1, 1); t = new Date(now.getFullYear(), now.getMonth(), 0); }
         else if (k === '7') f = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 6);
         else if (k === '30') f = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 29);
@@ -2279,7 +2289,7 @@ function computeCombinedAvgRate(metal){
 
         // 1. Summary
         html += `<div style="${_rpCardAcc('#1565C0')}">
-            ${_rpHead('📊', 'Summary', '#1565C0', `${_rpShort(from)} – ${_rpShort(to)} · ${days} day${days > 1 ? 's' : ''}`)}
+            ${_rpHead('📊', 'Summary', '#1565C0', _rpRange.all ? `All time · since ${new Date(from + 'T12:00:00').toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })} · ${days} days` : `${_rpShort(from)} – ${_rpShort(to)} · ${days} day${days > 1 ? 's' : ''}`)}
             <div style="display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:8px; text-align:center;">
                 <div><div style="font-size:17px; font-weight:800; color:#2E7D32;">${_rpFmt(T.in)}</div><div style="font-size:11px; color:var(--text2);">Money in</div></div>
                 <div><div style="font-size:17px; font-weight:800; color:#C62828;">${_rpFmt(T.out)}</div><div style="font-size:11px; color:var(--text2);">Money out</div></div>
@@ -2289,10 +2299,10 @@ function computeCombinedAvgRate(metal){
                 In: cash ${_rpFmt(T.inCash)} · UPI/card ${_rpFmt(T.inDig)}${T.inOj > 0 ? ' · old jewellery ' + _rpFmt(T.inOj) : ''}<br>
                 Out: cash ${_rpFmt(T.outCash)} · UPI/card ${_rpFmt(T.outDig)}${T.outOj > 0 ? ' · old jewellery ' + _rpFmt(T.outOj) : ''}
             </div>
-            <div style="font-size:11px; color:var(--text2); margin-top:8px; border-top:1px solid var(--border); padding-top:8px; line-height:1.6;">
+            ${_rpRange.all ? '' : `<div style="font-size:11px; color:var(--text2); margin-top:8px; border-top:1px solid var(--border); padding-top:8px; line-height:1.6;">
                 vs previous ${days} day${days > 1 ? 's' : ''} (${_rpShort(prevFrom)} – ${_rpShort(prevTo)}):
                 in ${_rpDelta(T.in, P.in)} · out ${_rpDelta(T.out, P.out)} · net ${_rpFmt(P.in - P.out)} before
-            </div>
+            </div>`}
         </div>`;
 
         // 2. Where the money went — ONE donut by category (expandable), with Received / Left over underneath
@@ -4277,7 +4287,7 @@ function computeCombinedAvgRate(metal){
         if (g('inv-rep-to')) g('inv-rep-to').value = to;
         if (g('rp-from')) g('rp-from').value = from;
         if (g('rp-to')) g('rp-to').value = to;
-        _rpRange.from = from; _rpRange.to = to;
+        _rpRange.from = from; _rpRange.to = to; _rpRange.all = false;
     }
     function pmAvClearCloud() { _pmAv.cloud = {}; _pmAv.from = ''; _pmAv.to = ''; _pmAvRefresh(); }
     function pmAvCloseFile(id) { _pmAv.files = _pmAv.files.filter(f => f.id !== id); _pmAvRefresh(); }
