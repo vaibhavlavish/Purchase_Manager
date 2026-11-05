@@ -1006,6 +1006,7 @@
         purchases.forEach(p => {
             if (p.planId) return;
             if (p.creditType === 'amount') return;      // rupee credit carries no metal
+            if (p.source === 'adjust') return;          // manual balance correction, not stock
             if (p.track !== track) return;
             if (new Date(p.createdAt) < startDate) return;
             totals[p.metal] = (totals[p.metal] || 0) + (p.weight || 0);
@@ -1212,11 +1213,11 @@ function computeCombinedAvgRate(metal){
         return `
             <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; background:var(--surface); border-radius:var(--radius); padding:10px 14px; margin-bottom:8px; box-shadow:0 1px 6px rgba(0,0,0,.06); ${p.status === 'credit' ? 'border-left:3px solid #FB8C00;' : ''}">
                 <div style="font-size:12.5px;">
-                    🛒 <b>${partyName}</b> · ${p.creditType === 'amount' ? `${_pmRs(p.amount)} <span style="color:#FB8C00;">(credit — amount)</span>` : `${p.metal} · ${(p.weight || 0).toFixed(2)}g ${p.status === 'paid' ? (p.rate > 0 ? `@ ₹${p.rate.toFixed(2)}/g` : '<span style="color:var(--text2);">(no rate — metal exchange)</span>') : (p.rate > 0 ? `@ ₹${p.rate.toFixed(2)}/g <span style="color:#FB8C00;">(credit — owes ${_pmRs(_pmFixedOwed(p))})</span>` : '<span style="color:#FB8C00;">(credit)</span>')}`}
+                    🛒 <b>${partyName}</b>${p.source === 'adjust' ? ' <span style="font-size:10.5px; color:var(--text2);">⚖ balance adjustment</span>' : ''} · ${p.creditType === 'amount' ? `${_pmRs(p.amount)} <span style="color:#FB8C00;">(credit — amount)</span>` : `${p.metal} · ${(p.weight || 0).toFixed(2)}g ${p.status === 'paid' ? (p.rate > 0 ? `@ ₹${p.rate.toFixed(2)}/g` : '<span style="color:var(--text2);">(no rate — metal exchange)</span>') : (p.rate > 0 ? `@ ₹${p.rate.toFixed(2)}/g <span style="color:#FB8C00;">(credit — owes ${_pmRs(_pmFixedOwed(p))})</span>` : '<span style="color:#FB8C00;">(credit)</span>')}`}
                     <div style="font-size:10.5px; color:var(--text2);">${p.date || ''}${p.extra ? ' · +' + _pmRs(p.extra) + ' extra' : ''}${p.note ? ' · ' + p.note.replace(/</g, '&lt;') : ''}</div>
                 </div>
                 <div style="display:flex; align-items:center; gap:8px;">
-                    ${fromPos ? '<span style="font-size:10.5px; color:var(--text2); text-align:right;">from POS ledger<br>(edit there)</span>' : `<button onclick="openPurchaseModal(null, '${p.id}')" title="Edit" style="background:none; border:1.5px solid var(--border); color:var(--text); font-weight:700; padding:5px 10px; border-radius:8px; font-size:11px; width:auto; margin:0;">Edit</button>
+                    ${fromPos ? '<span style="font-size:10.5px; color:var(--text2); text-align:right;">from POS ledger<br>(edit there)</span>' : `${p.source === 'adjust' ? '' : `<button onclick="openPurchaseModal(null, '${p.id}')" title="Edit" style="background:none; border:1.5px solid var(--border); color:var(--text); font-weight:700; padding:5px 10px; border-radius:8px; font-size:11px; width:auto; margin:0;">Edit</button>`}
                     <button onclick="deletePurchase('${p.id}')" title="Remove" style="background:none; border:none; color:#C62828; font-size:16px; padding:0; width:auto; box-shadow:none; margin:0;">✕</button>`}
                 </div>
             </div>`;
@@ -1227,11 +1228,11 @@ function computeCombinedAvgRate(metal){
         return `
             <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; background:var(--surface); border-radius:var(--radius); padding:10px 14px; margin-bottom:8px; box-shadow:0 1px 6px rgba(0,0,0,.06); border-left:3px solid #2E7D32;">
                 <div style="font-size:12.5px; min-width:0;">
-                    💳 <b>${_rpEsc(getPartyName(x.partyId))}</b> · ${amt ? `${_pmRs(x.amount)} <span style="color:#2E7D32;">(payment — amount)</span>` : `${x.metal} · ${(x.weight || 0).toFixed(2)}g ${x.rate > 0 ? '@ ₹' + x.rate.toFixed(2) + '/g' : '(in metal)'} <span style="color:#2E7D32;">(payment)</span>`}
+                    💳 <b>${_rpEsc(getPartyName(x.partyId))}</b>${x.source === 'adjust' ? ' <span style="font-size:10.5px; color:var(--text2);">⚖ balance adjustment</span>' : ''} · ${amt ? `${_pmRs(x.amount)} <span style="color:#2E7D32;">(payment — amount)</span>` : `${x.metal} · ${(x.weight || 0).toFixed(2)}g ${x.rate > 0 ? '@ ₹' + x.rate.toFixed(2) + '/g' : '(in metal)'} <span style="color:#2E7D32;">(payment)</span>`}
                     <div style="font-size:10.5px; color:var(--text2);">${x.date || ''}${x.note ? ' · ' + _rpEsc(x.note) : ''}</div>
                 </div>
                 <div style="display:flex; align-items:center; gap:8px; flex-shrink:0;">
-                    <button onclick="openPaymentModal('${x.id}')" title="Edit" style="background:none; border:1.5px solid var(--border); color:var(--text); font-weight:700; padding:5px 10px; border-radius:8px; font-size:11px; width:auto; margin:0;">Edit</button>
+                    ${x.source === 'adjust' ? '' : `<button onclick="openPaymentModal('${x.id}')" title="Edit" style="background:none; border:1.5px solid var(--border); color:var(--text); font-weight:700; padding:5px 10px; border-radius:8px; font-size:11px; width:auto; margin:0;">Edit</button>`}
                     <button onclick="deletePayment('${x.id}')" title="Remove" style="background:none; border:none; color:#C62828; font-size:16px; padding:0; width:auto; box-shadow:none; margin:0;">✕</button>
                 </div>
             </div>`;
@@ -4532,13 +4533,15 @@ function computeCombinedAvgRate(metal){
             else if (_pmFixed(p)) txt = `Purchase · ${p.metal} ${(p.weight || 0).toFixed(2)}g @ ${_pmRs(p.rate)}/g <span style="color:#FB8C00;">on credit (owes ${_pmRs(_pmFixedOwed(p))}${p.extra ? ', incl. ' + _pmRs(p.extra) + ' extra' : ''})</span>`;
             else if (p.status === 'paid') txt = `Purchase · ${p.metal} ${(p.weight || 0).toFixed(2)}g @ ${_pmRs(p.rate)}/g${p.planId ? ' <span style="color:var(--text2);">(plan)</span>' : ''}`;
             else txt = `Purchase · ${p.metal} ${(p.weight || 0).toFixed(2)}g <span style="color:#FB8C00;">on credit</span>`;
-            items.push({ t: p.createdAt, date: p.date, color: '#1C1C1E', txt, note: p.note, kind: 'pur', id: p.id, pos: p.source === 'pos-oj' || p.source === 'pos' });
+            if (p.source === 'adjust') txt = p.creditType === 'amount' ? `Balance adjustment · owes ${_pmRs(p.amount)} more` : `Balance adjustment · owes ${(p.weight || 0).toFixed(2)}g ${p.metal} more`;
+            items.push({ t: p.createdAt, date: p.date, color: '#1C1C1E', txt, note: p.note, kind: 'pur', adj: p.source === 'adjust', id: p.id, pos: p.source === 'pos-oj' || p.source === 'pos' });
         });
         d.pay.forEach(x => {
-            const txt = x.payType === 'amount'
+            let txt = x.payType === 'amount'
                 ? `Payment · ${_pmRs(x.amount)}`
                 : `Payment · ${x.metal} ${(x.weight || 0).toFixed(2)}g ${x.rate ? '@ ' + _pmRs(x.rate) + '/g' : '(in metal)'}`;
-            items.push({ t: x.createdAt, date: x.date, color: '#2E7D32', txt, note: x.note, kind: 'pay', id: x.id });
+            if (x.source === 'adjust') txt = x.payType === 'amount' ? `Balance adjustment · owes ${_pmRs(x.amount)} less` : `Balance adjustment · owes ${(x.weight || 0).toFixed(2)}g ${x.metal} less`;
+            items.push({ t: x.createdAt, date: x.date, color: '#2E7D32', txt, note: x.note, kind: 'pay', adj: x.source === 'adjust', id: x.id });
         });
         d.piece.forEach(r => {
             const isPay = r.kind === 'payment';
@@ -4600,7 +4603,8 @@ function computeCombinedAvgRate(metal){
                 html += `<div style="display:flex; gap:8px; margin-bottom:12px;">
                     <button onclick="pmSupLogPurchase('${_rpEsc(p.id)}')" style="flex:1; margin:0; padding:11px; background:var(--gold); color:white; border:none; border-radius:10px; font-size:13px; font-weight:800;">🛒 Log purchase</button>
                     <button onclick="pmSupLogPayment('${_rpEsc(p.id)}')" style="flex:1; margin:0; padding:11px; background:#1a1a1a; color:white; border:none; border-radius:10px; font-size:13px; font-weight:800;">💳 Log payment</button>
-                </div>`;
+                </div>
+                <button onclick="pmSupEditBalance('${_rpEsc(p.id)}')" style="width:100%; margin:0 0 12px; padding:10px; background:transparent; color:var(--text); border:1.5px solid var(--border); border-radius:10px; font-size:13px; font-weight:800; box-shadow:none;">⚖ Edit balance</button>`;
                 // History
                 const hist = _pmSupHistory(d);
                 if (hist.length) {
@@ -4611,7 +4615,7 @@ function computeCombinedAvgRate(metal){
                         const hd = h.date || (h.t || '').slice(0, 10), m = hd.slice(0, 7);
                         if (m !== curM) { curM = m; html += `<div style="${_pmMonthHdCss}">${_pmMonthLabel(m)}</div>`; }
                         const acts = (h.id && !h.pos) ? `<div style="display:flex; gap:6px; align-items:center; flex-shrink:0;">
-                            <button onclick="${h.kind === 'pay' ? `openPaymentModal('${h.id}')` : `openPurchaseModal(null,'${h.id}')`}" style="background:none; border:1.5px solid var(--border); color:var(--text); font-weight:700; padding:5px 10px; border-radius:8px; font-size:11px; width:auto; margin:0;">Edit</button>
+                            ${h.adj ? '' : `<button onclick="${h.kind === 'pay' ? `openPaymentModal('${h.id}')` : `openPurchaseModal(null,'${h.id}')`}" style="background:none; border:1.5px solid var(--border); color:var(--text); font-weight:700; padding:5px 10px; border-radius:8px; font-size:11px; width:auto; margin:0;">Edit</button>`}
                             <button onclick="${h.kind === 'pay' ? 'deletePayment' : 'deletePurchase'}('${h.id}')" style="background:none; border:none; color:#C62828; font-size:16px; padding:0; width:auto; box-shadow:none; margin:0;">✕</button></div>` : '';
                         html += `<div style="display:flex; justify-content:space-between; align-items:center; gap:8px; padding:6px 0; border-top:1px solid #eee; font-size:12.5px; color:${h.color};">
                             <div style="min-width:0;">${h.kind === 'pay' ? '💳 ' : h.kind === 'pur' ? '🛒 ' : ''}${h.txt}
@@ -4624,6 +4628,62 @@ function computeCombinedAvgRate(metal){
             html += '</div>';
         });
         el.innerHTML = html;
+    }
+
+
+    // ── Edit supplier balance ──
+    // Balances are always worked out from the entries, so "editing" a balance logs the
+    // difference as one adjustment entry (shown in History, deletable). It never counts as
+    // metal bought and has no rate, so stock totals and P&L are untouched.
+    function pmSupEditBalance(pid) {
+        const T = currentInvTrack, raw = _pmBal(pid, T);
+        const v = (n, d) => String(+Math.max(0, n).toFixed(d));
+        const lblCss = 'font-size:11px; font-weight:700; color:#888; display:block; margin:10px 0 4px; text-align:left;';
+        const inCss = 'width:100%; padding:10px 12px; border:1.5px solid #e0e0e0; border-radius:10px; font-size:14px; box-sizing:border-box; margin:0;';
+        document.getElementById('pm-alert-title').textContent = 'Edit balance';
+        document.getElementById('pm-alert-message').innerHTML =
+            `<div style="text-align:left; font-size:13px;"><b>${_rpEsc(getPartyName(pid))}</b> · Track ${T}<br>Type what this supplier's balance <b>should be</b> now.
+            <label style="${lblCss}">GOLD OWED (g)</label><input type="number" id="eb-gold" step="0.001" min="0" value="${v(raw.Gold, 3)}" style="${inCss}">
+            <label style="${lblCss}">SILVER OWED (g)</label><input type="number" id="eb-silver" step="0.001" min="0" value="${v(raw.Silver, 3)}" style="${inCss}">
+            <label style="${lblCss}">AMOUNT OWED (₹)</label><input type="number" id="eb-amt" step="0.01" min="0" value="${v(raw.amt, 2)}" style="${inCss}">
+            <label style="${lblCss}">NOTE (optional)</label><input type="text" id="eb-note" placeholder="e.g. Opening balance, correction" style="${inCss}">
+            <p class="note" style="margin:10px 0 0;">The difference is saved as a “balance adjustment” entry in History. You can delete it later to undo.</p></div>`;
+        _pmConfirmCallback = null;
+        document.getElementById('pm-alert-actions').innerHTML =
+            `<button onclick="closePmAlert()" style="flex:1; padding:12px; background:#eee; color:#333; border:none; border-radius:10px; font-weight:700;">Cancel</button>
+             <button onclick="pmSupEditBalanceSave('${_rpEsc(pid)}')" style="flex:1; padding:12px; background:var(--gold); color:white; border:none; border-radius:10px; font-weight:700;">Save</button>`;
+        document.getElementById('pm-alert-modal').classList.add('show');
+    }
+    async function pmSupEditBalanceSave(pid) {
+        const T = currentInvTrack, raw = _pmBal(pid, T);
+        const read = id => { const n = parseFloat(document.getElementById(id).value); return isNaN(n) ? null : n; };
+        const want = { Gold: read('eb-gold'), Silver: read('eb-silver'), amt: read('eb-amt') };
+        if (Object.values(want).some(n => n === null || n < 0)) { showCustomAlert('Enter 0 or more in every field.'); return; }
+        const note = document.getElementById('eb-note').value.trim() || 'Balance adjustment';
+        const now = new Date(), date = now.toISOString().slice(0, 10), createdAt = now.toISOString();
+        const base = () => ({ id: crypto.randomUUID(), partyId: pid, track: T, note, date, createdAt, source: 'adjust' });
+        const pur = {}, pay = {};
+        ['Gold', 'Silver'].forEach(m => {
+            const d = want[m] - raw[m]; if (Math.abs(d) < 0.0005) return;
+            const e = base();
+            if (d > 0) pur[e.id] = { ...e, metal: m, weight: +d.toFixed(3), status: 'credit', rate: 0 };
+            else pay[e.id] = { ...e, metal: m, weight: +(-d).toFixed(3), rate: 0 };
+        });
+        const da = want.amt - raw.amt;
+        if (Math.abs(da) >= 0.005) {
+            const e = base();
+            if (da > 0) pur[e.id] = { ...e, status: 'credit', creditType: 'amount', amount: +da.toFixed(2) };
+            else pay[e.id] = { ...e, payType: 'amount', amount: +(-da).toFixed(2) };
+        }
+        if (!Object.keys(pur).length && !Object.keys(pay).length) { closePmAlert(); return; }
+        try {
+            if (Object.keys(pur).length) await window.dbUpdate(window.dbRef(window.firebaseDB, 'purchases'), pur);
+            if (Object.keys(pay).length) await window.dbUpdate(window.dbRef(window.firebaseDB, 'payments'), pay);
+            closePmAlert();
+        } catch (e) {
+            console.error('[Balance] adjust failed', e);
+            showCustomAlert(window._writeAllowed ? 'Could not save — try again.' : 'Writes are disabled — this copy is running in read-only mode.');
+        }
     }
 
     // Opens the normal Purchase modal with this supplier already selected.
