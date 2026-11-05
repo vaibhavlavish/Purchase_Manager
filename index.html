@@ -506,6 +506,7 @@
             <h3 id="payment-title" style="margin:0; font-size:18px; color:#1a1a1a;">New Payment</h3>
             <button onclick="closePaymentModal()" style="background:none; border:none; font-size:22px; color:#aaa; padding:0; width:auto; box-shadow:none; margin:0;">✕</button>
         </div>
+        <input type="hidden" id="payment-id" value="">
         <p class="note" id="payment-balance-note" style="margin-bottom:14px;"></p>
 
         <label style="font-size:12px; font-weight:700; color:#888; margin:0 0 4px 0;">PARTY</label>
@@ -1209,9 +1210,9 @@ function computeCombinedAvgRate(metal){
         const partyName = _pmPurWho(p);
         const fromPos = p.source === 'pos-oj' || p.source === 'pos';
         return `
-            <div style="display:flex; justify-content:space-between; align-items:center; background:var(--surface); border-radius:var(--radius); padding:10px 14px; margin-bottom:8px; box-shadow:0 1px 6px rgba(0,0,0,.06); ${p.status === 'credit' ? 'border-left:3px solid #FB8C00;' : ''}">
+            <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; background:var(--surface); border-radius:var(--radius); padding:10px 14px; margin-bottom:8px; box-shadow:0 1px 6px rgba(0,0,0,.06); ${p.status === 'credit' ? 'border-left:3px solid #FB8C00;' : ''}">
                 <div style="font-size:12.5px;">
-                    <b>${partyName}</b> · ${p.creditType === 'amount' ? `${_pmRs(p.amount)} <span style="color:#FB8C00;">(credit — amount)</span>` : `${p.metal} · ${(p.weight || 0).toFixed(2)}g ${p.status === 'paid' ? (p.rate > 0 ? `@ ₹${p.rate.toFixed(2)}/g` : '<span style="color:var(--text2);">(no rate — metal exchange)</span>') : (p.rate > 0 ? `@ ₹${p.rate.toFixed(2)}/g <span style="color:#FB8C00;">(credit — owes ${_pmRs(_pmFixedOwed(p))})</span>` : '<span style="color:#FB8C00;">(credit)</span>')}`}
+                    🛒 <b>${partyName}</b> · ${p.creditType === 'amount' ? `${_pmRs(p.amount)} <span style="color:#FB8C00;">(credit — amount)</span>` : `${p.metal} · ${(p.weight || 0).toFixed(2)}g ${p.status === 'paid' ? (p.rate > 0 ? `@ ₹${p.rate.toFixed(2)}/g` : '<span style="color:var(--text2);">(no rate — metal exchange)</span>') : (p.rate > 0 ? `@ ₹${p.rate.toFixed(2)}/g <span style="color:#FB8C00;">(credit — owes ${_pmRs(_pmFixedOwed(p))})</span>` : '<span style="color:#FB8C00;">(credit)</span>')}`}
                     <div style="font-size:10.5px; color:var(--text2);">${p.date || ''}${p.extra ? ' · +' + _pmRs(p.extra) + ' extra' : ''}${p.note ? ' · ' + p.note.replace(/</g, '&lt;') : ''}</div>
                 </div>
                 <div style="display:flex; align-items:center; gap:8px;">
@@ -1219,6 +1220,44 @@ function computeCombinedAvgRate(metal){
                     <button onclick="deletePurchase('${p.id}')" title="Remove" style="background:none; border:none; color:#C62828; font-size:16px; padding:0; width:auto; box-shadow:none; margin:0;">✕</button>`}
                 </div>
             </div>`;
+    }
+
+    function _paymentRow(x){
+        const amt = x.payType === 'amount';
+        return `
+            <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; background:var(--surface); border-radius:var(--radius); padding:10px 14px; margin-bottom:8px; box-shadow:0 1px 6px rgba(0,0,0,.06); border-left:3px solid #2E7D32;">
+                <div style="font-size:12.5px; min-width:0;">
+                    💳 <b>${_rpEsc(getPartyName(x.partyId))}</b> · ${amt ? `${_pmRs(x.amount)} <span style="color:#2E7D32;">(payment — amount)</span>` : `${x.metal} · ${(x.weight || 0).toFixed(2)}g ${x.rate > 0 ? '@ ₹' + x.rate.toFixed(2) + '/g' : '(in metal)'} <span style="color:#2E7D32;">(payment)</span>`}
+                    <div style="font-size:10.5px; color:var(--text2);">${x.date || ''}${x.note ? ' · ' + _rpEsc(x.note) : ''}</div>
+                </div>
+                <div style="display:flex; align-items:center; gap:8px; flex-shrink:0;">
+                    <button onclick="openPaymentModal('${x.id}')" title="Edit" style="background:none; border:1.5px solid var(--border); color:var(--text); font-weight:700; padding:5px 10px; border-radius:8px; font-size:11px; width:auto; margin:0;">Edit</button>
+                    <button onclick="deletePayment('${x.id}')" title="Remove" style="background:none; border:none; color:#C62828; font-size:16px; padding:0; width:auto; box-shadow:none; margin:0;">✕</button>
+                </div>
+            </div>`;
+    }
+    function _pmMonthLabel(m){
+        if (!m) return 'No date';
+        const d = new Date(m + '-01T12:00:00');
+        return isNaN(d) ? m : d.toLocaleDateString('en-IN', { month: 'long', year: 'numeric' });
+    }
+    const _pmMonthHdCss = 'font-size:10.5px; font-weight:800; color:var(--text2); background:#F7F7F5; border-radius:8px; padding:4px 8px; margin:10px 0 6px;';
+    let _pmEntFilter = 'all';
+    function _pmSetEntFilter(k){ _pmEntFilter = k; renderPurchaseTab(); }
+    // One date-ordered list of purchases AND payments, grouped by month, filtered by the chips.
+    function _pmEntList(purs, pays){
+        const items = [];
+        if (_pmEntFilter !== 'pay') purs.forEach(p => items.push({ d: p.date || (p.createdAt || '').slice(0, 10), t: p.createdAt, html: _purchaseRow(p) }));
+        if (_pmEntFilter !== 'pur') pays.forEach(x => items.push({ d: x.date || (x.createdAt || '').slice(0, 10), t: x.createdAt, html: _paymentRow(x) }));
+        items.sort((a, b) => new Date(b.t) - new Date(a.t));
+        const cnt = {}; items.forEach(i => { const m = (i.d || '').slice(0, 7); cnt[m] = (cnt[m] || 0) + 1; });
+        let out = '', cur = null;
+        items.forEach(i => {
+            const m = (i.d || '').slice(0, 7);
+            if (m !== cur) { cur = m; out += `<div style="${_pmMonthHdCss}">${_pmMonthLabel(m)} · ${cnt[m]}</div>`; }
+            out += i.html;
+        });
+        return out || '<div class="note" style="margin:6px 0;">Nothing to show.</div>';
     }
 
     // ── Main Purchase tab render ──
@@ -1410,6 +1449,9 @@ function computeCombinedAvgRate(metal){
             const trackEntries = purchases
                 .filter(p => !p.planId && p.track === track && new Date(p.createdAt) >= trackStartDate)
                 .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+            const trackPays = payments
+                .filter(x => x.track === track && new Date(x.createdAt) >= trackStartDate)
+                .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
             const owedEntries = manualOwedLog
                 .filter(e => e.track === track && new Date(e.createdAt) >= trackStartDate)
                 .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
@@ -1464,11 +1506,13 @@ function computeCombinedAvgRate(metal){
                             </div>
                         `).join('')}</div>` : ''}
                     ` : ''}
-                    ${trackEntries.length ? `
+                    ${(trackEntries.length || trackPays.length) ? `
                         <div onclick="_toggleHedgePlanEntries('track_${track}')" style="margin-top:8px; padding-top:8px; border-top:1px solid var(--border); font-size:11px; font-weight:700; color:var(--text2); cursor:pointer; user-select:none;">
-                            ${trackExpanded ? '▾' : '▸'} ${trackEntries.length} purchase${trackEntries.length === 1 ? '' : 's'} logged
+                            ${trackExpanded ? '▾' : '▸'} ${trackEntries.length + trackPays.length} entries · ${trackEntries.length} purchase${trackEntries.length === 1 ? '' : 's'} · ${trackPays.length} payment${trackPays.length === 1 ? '' : 's'}
                         </div>
-                        ${trackExpanded ? `<div style="margin-top:6px;">${trackEntries.map(p => _purchaseRow(p)).join('')}</div>` : ''}
+                        ${trackExpanded ? `
+                            <div style="display:flex; gap:6px; margin:8px 0 2px;">${[['all', 'All'], ['pur', '🛒 Purchases'], ['pay', '💳 Payments']].map(([k, l]) => `<button onclick="_pmSetEntFilter('${k}')" style="width:auto; margin:0; padding:5px 11px; border-radius:999px; font-size:11px; font-weight:700; box-shadow:none; border:1.5px solid ${_pmEntFilter === k ? 'var(--gold)' : 'var(--border)'}; background:${_pmEntFilter === k ? 'var(--gold)' : 'transparent'}; color:${_pmEntFilter === k ? 'white' : 'var(--text2)'};">${l}</button>`).join('')}</div>
+                            <div>${_pmEntList(trackEntries, trackPays)}</div>` : ''}
                     ` : ''}
                 </div>`;
         }
@@ -1732,17 +1776,66 @@ function computeCombinedAvgRate(metal){
         }
     }
 
+    // ── Delete-impact preview ──
+    // Unclamped balances for one supplier on one track, optionally pretending one purchase /
+    // payment is gone — used to show "what changes" before a delete is confirmed.
+    function _pmBal(pid, track, skipPur, skipPay){
+        const P = purchases.filter(p => p.id !== skipPur && p.partyId === pid && p.track === track && p.status === 'credit');
+        const Y = payments.filter(x => x.id !== skipPay && x.partyId === pid && x.track === track);
+        const sum = (arr, fn) => arr.reduce((t, x) => t + fn(x), 0);
+        const r = {};
+        ['Gold', 'Silver'].forEach(m => {
+            r[m] = sum(P.filter(p => p.metal === m && !((p.rate || 0) > 0)), p => p.weight || 0) - sum(Y.filter(x => x.metal === m), x => x.weight || 0);
+        });
+        r.amt = sum(P.filter(p => p.creditType === 'amount' || _pmFixed(p)), p => p.creditType === 'amount' ? (p.amount || 0) : _pmFixedOwed(p))
+              - sum(Y.filter(x => x.payType === 'amount'), x => x.amount || 0);
+        return r;
+    }
+    function _pmImpactHtml(pid, track, skipPur, skipPay){
+        const a = _pmBal(pid, track), b = _pmBal(pid, track, skipPur, skipPay);
+        const lab = { Gold: 'Gold owed', Silver: 'Silver owed', amt: 'Amount owed' };
+        const fmt = { Gold: v => v.toFixed(2) + 'g', Silver: v => v.toFixed(2) + 'g', amt: _pmRs };
+        const lines = []; let over = false;
+        ['Gold', 'Silver', 'amt'].forEach(k => {
+            if (Math.abs(a[k] - b[k]) > 0.004) lines.push(`${lab[k]}: <b>${fmt[k](Math.max(0, a[k]))}</b> → <b>${fmt[k](Math.max(0, b[k]))}</b>`);
+            if (b[k] < -0.004 && b[k] < a[k]) over = true;
+        });
+        let h = '';
+        if (lines.length) h += `<div style="margin-top:10px; font-size:12.5px; line-height:1.7; text-align:left;"><b>What changes for this supplier</b><br>${lines.join('<br>')}</div>`;
+        if (over) h += `<div style="margin-top:8px; font-size:12px; font-weight:700; color:#C62828; text-align:left;">⚠ Payments already logged would then be more than what is owed. Remove or edit those payments as well, otherwise the balance just shows 0.</div>`;
+        return h;
+    }
+
     async function deletePurchase(id){
         const _pu = purchases.find(p => p.id === id);
         if (_pu && (_pu.source === 'pos-oj' || _pu.source === 'pos')) { showCustomAlert('This purchase comes from an entry in the POS ledger. Delete that ledger entry in the POS instead.'); return; }
         const _puTxt = _pu ? ` (${getPartyName(_pu.partyId)}${_pu.weight ? ' · ' + _pu.weight + 'g' : ''}${_pu.amount ? ' · ₹' + Math.round(_pu.amount).toLocaleString('en-IN') : ''})` : '';
-        showCustomConfirm('Delete this purchase record' + _puTxt + '? This cannot be undone.', 'Delete', async () => {
+        const _puImp = !_pu ? '' : (_pu.status === 'credit' ? _pmImpactHtml(_pu.partyId, _pu.track, id, null)
+            : `<div style="margin-top:10px; font-size:12.5px; text-align:left;">This was a paid purchase, so no supplier balance changes. It is removed from the metal-bought totals, so "to buy" goes up by ${(_pu.weight || 0).toFixed(2)}g.</div>`);
+        showCustomConfirm('Delete this purchase record' + _puTxt + '? This cannot be undone.' + _puImp, 'Delete', async () => {
             try {
                 await window.dbUpdate(window.dbRef(window.firebaseDB, 'purchases'), { [id]: null });
                 purchases = purchases.filter(p => p.id !== id);
                 renderPurchaseTab();
             } catch (e) {
                 console.error('[Purchases] delete failed', e);
+                showCustomAlert(window._writeAllowed ? 'Could not delete — try again.' : 'Writes are disabled — this copy is running in read-only mode.');
+            }
+        });
+    }
+
+
+    async function deletePayment(id){
+        const x = payments.find(p => p.id === id);
+        if (!x) return;
+        const what = x.payType === 'amount' ? _pmRs(x.amount) : x.metal + ' ' + (x.weight || 0).toFixed(2) + 'g';
+        showCustomConfirm('Delete this payment (' + _rpEsc(getPartyName(x.partyId)) + ' · ' + what + (x.date ? ' · ' + x.date : '') + ')? It goes back onto what you owe this supplier. This cannot be undone.' + _pmImpactHtml(x.partyId, x.track, null, id), 'Delete', async () => {
+            try {
+                await window.dbUpdate(window.dbRef(window.firebaseDB, 'payments'), { [id]: null });
+                payments = payments.filter(p => p.id !== id);
+                renderPurchaseTab();
+            } catch (e) {
+                console.error('[Payments] delete failed', e);
                 showCustomAlert(window._writeAllowed ? 'Could not delete — try again.' : 'Writes are disabled — this copy is running in read-only mode.');
             }
         });
@@ -1795,17 +1888,28 @@ function computeCombinedAvgRate(metal){
         return eligible;
     }
 
-    function openPaymentModal(){
-        const eligible = _rebuildPaymentPartyDropdown();
+    function openPaymentModal(editId){
+        const ex = editId ? payments.find(x => x.id === editId) : null;
+        if (editId && !ex) return;
+        let eligible;
+        if (ex) {
+            // Editing: the supplier may already be fully settled, so list everyone.
+            document.getElementById('payment-party').innerHTML = parties.map(p => `<option value="${p.id}">${p.name.replace(/</g, '&lt;')}</option>`).join('');
+            eligible = parties;
+        } else eligible = _rebuildPaymentPartyDropdown();
         if (!eligible.length) { showCustomAlert('No parties have outstanding credit right now.'); return; }
-        document.getElementById('payment-metal').value = 'Gold';
-        document.getElementById('payment-type').value = 'metal';
-        document.getElementById('payment-amount').value = '';
-        document.getElementById('payment-weight').value = '';
-        document.getElementById('payment-date').value = new Date().toISOString().slice(0, 10);
-        document.getElementById('payment-rate').value = '';
-        document.getElementById('payment-note').value = '';
-        onPaymentPartyChange();
+        document.getElementById('payment-id').value = ex ? ex.id : '';
+        document.getElementById('payment-title').textContent = ex ? 'Edit Payment' : 'New Payment';
+        document.getElementById('payment-save-btn').textContent = ex ? '✓ Save Changes' : '✓ Save Payment';
+        document.getElementById('payment-metal').value = ex && ex.metal ? ex.metal : 'Gold';
+        document.getElementById('payment-type').value = ex && ex.payType === 'amount' ? 'amount' : 'metal';
+        document.getElementById('payment-amount').value = ex && ex.payType === 'amount' ? ex.amount : '';
+        document.getElementById('payment-weight').value = ex && ex.payType !== 'amount' ? (ex.weight || '') : '';
+        document.getElementById('payment-date').value = ex ? (ex.date || '') : new Date().toISOString().slice(0, 10);
+        document.getElementById('payment-rate').value = ex && ex.rate ? ex.rate : '';
+        document.getElementById('payment-note').value = ex ? (ex.note || '') : '';
+        if (ex) { document.getElementById('payment-party').value = ex.partyId; onPaymentSelectionChange(); }
+        else onPaymentPartyChange();
         document.getElementById('payment-modal').classList.add('show');
     }
 
@@ -1814,6 +1918,8 @@ function computeCombinedAvgRate(metal){
     }
 
     async function savePayment(){
+        const _exId = document.getElementById('payment-id').value;
+        const ex = _exId ? payments.find(x => x.id === _exId) : null;
         const partyId = document.getElementById('payment-party').value;
         const metal = document.getElementById('payment-metal').value;
         const weight = parseFloat(document.getElementById('payment-weight').value) || 0;
@@ -1824,10 +1930,10 @@ function computeCombinedAvgRate(metal){
             const amount = parseFloat(document.getElementById('payment-amount').value) || 0;
             if (amount <= 0) { showCustomAlert('Enter the amount paid.'); return; }
             if (!dateVal) { showCustomAlert('Enter the payment date.'); return; }
-            const availAmt = getPartyAmountBalance(partyId, currentInvTrack);
+            const availAmt = getPartyAmountBalance(partyId, currentInvTrack) + ((ex && ex.partyId === partyId && ex.payType === 'amount') ? (ex.amount || 0) : 0);
             if (amount > availAmt + 0.01) { showCustomAlert(`That's more than the ${_pmRs(availAmt)} still outstanding.`); return; }
-            const idA = crypto.randomUUID();
-            const entryA = { id: idA, partyId, track: currentInvTrack, payType: 'amount', amount, note: note || null, date: dateVal, createdAt: new Date(dateVal + 'T12:00:00.000Z').toISOString() };
+            const idA = ex ? ex.id : crypto.randomUUID();
+            const entryA = { id: idA, partyId, track: ex ? ex.track : currentInvTrack, payType: 'amount', amount, note: note || null, date: dateVal, createdAt: new Date(dateVal + 'T12:00:00.000Z').toISOString() };
             try { await window.dbUpdate(window.dbRef(window.firebaseDB, 'payments'), { [idA]: entryA }); closePaymentModal(); }
             catch (e) {
                 console.error('[Payments] save failed', e);
@@ -1838,15 +1944,15 @@ function computeCombinedAvgRate(metal){
         if (weight <= 0) { showCustomAlert('Enter weight paid.'); return; }
         if (!dateVal) { showCustomAlert('Enter the payment date.'); return; }
 
-        const available = getPartyCreditBalance(partyId, currentInvTrack, metal);
+        const available = getPartyCreditBalance(partyId, currentInvTrack, metal) + ((ex && ex.partyId === partyId && ex.payType !== 'amount' && ex.metal === metal) ? (ex.weight || 0) : 0);
         if (weight > available + 0.001) {
             showCustomAlert(`That's more than the ${available.toFixed(2)}g still outstanding.`);
             return;
         }
 
         const createdAt = new Date(dateVal + 'T12:00:00.000Z').toISOString();
-        const id = crypto.randomUUID();
-        const entry = { id, partyId, track: currentInvTrack, metal, weight, rate, note: note || null, date: dateVal, createdAt };
+        const id = ex ? ex.id : crypto.randomUUID();
+        const entry = { id, partyId, track: ex ? ex.track : currentInvTrack, metal, weight, rate, note: note || null, date: dateVal, createdAt };
         try {
             await window.dbUpdate(window.dbRef(window.firebaseDB, 'payments'), { [id]: entry });
             closePaymentModal();
@@ -4373,6 +4479,8 @@ function computeCombinedAvgRate(metal){
         document.getElementById('pm-sup-full').style.display = 'none';
     }
     function pmSupToggle(id) { _pmSupExp[id] = !_pmSupExp[id]; pmSupRender(); }
+    const _pmSupHistAll = {};
+    function pmSupHistToggle(id) { _pmSupHistAll[id] = !_pmSupHistAll[id]; pmSupRender(); }
 
     function _pmSupData(pid) {
         const T = currentInvTrack;
@@ -4424,13 +4532,13 @@ function computeCombinedAvgRate(metal){
             else if (_pmFixed(p)) txt = `Purchase · ${p.metal} ${(p.weight || 0).toFixed(2)}g @ ${_pmRs(p.rate)}/g <span style="color:#FB8C00;">on credit (owes ${_pmRs(_pmFixedOwed(p))}${p.extra ? ', incl. ' + _pmRs(p.extra) + ' extra' : ''})</span>`;
             else if (p.status === 'paid') txt = `Purchase · ${p.metal} ${(p.weight || 0).toFixed(2)}g @ ${_pmRs(p.rate)}/g${p.planId ? ' <span style="color:var(--text2);">(plan)</span>' : ''}`;
             else txt = `Purchase · ${p.metal} ${(p.weight || 0).toFixed(2)}g <span style="color:#FB8C00;">on credit</span>`;
-            items.push({ t: p.createdAt, date: p.date, color: '#1C1C1E', txt, note: p.note });
+            items.push({ t: p.createdAt, date: p.date, color: '#1C1C1E', txt, note: p.note, kind: 'pur', id: p.id, pos: p.source === 'pos-oj' || p.source === 'pos' });
         });
         d.pay.forEach(x => {
             const txt = x.payType === 'amount'
                 ? `Payment · ${_pmRs(x.amount)}`
                 : `Payment · ${x.metal} ${(x.weight || 0).toFixed(2)}g ${x.rate ? '@ ' + _pmRs(x.rate) + '/g' : '(in metal)'}`;
-            items.push({ t: x.createdAt, date: x.date, color: '#2E7D32', txt, note: x.note });
+            items.push({ t: x.createdAt, date: x.date, color: '#2E7D32', txt, note: x.note, kind: 'pay', id: x.id });
         });
         d.piece.forEach(r => {
             const isPay = r.kind === 'payment';
@@ -4497,11 +4605,19 @@ function computeCombinedAvgRate(metal){
                 const hist = _pmSupHistory(d);
                 if (hist.length) {
                     html += `<div style="${_hdCss}">History</div>`;
-                    hist.slice(0, 40).forEach(h => {
-                        html += `<div style="padding:6px 0; border-top:1px solid #eee; font-size:12.5px; color:${h.color};">${h.txt}
-                            <div style="font-size:10.5px; color:var(--text2);">${_rpEsc(h.date || (h.t || '').slice(0, 10))}${h.note ? ' · ' + _rpEsc(h.note) : ''}</div></div>`;
+                    const lim = _pmSupHistAll[p.id] ? hist.length : 40;
+                    let curM = null;
+                    hist.slice(0, lim).forEach(h => {
+                        const hd = h.date || (h.t || '').slice(0, 10), m = hd.slice(0, 7);
+                        if (m !== curM) { curM = m; html += `<div style="${_pmMonthHdCss}">${_pmMonthLabel(m)}</div>`; }
+                        const acts = (h.id && !h.pos) ? `<div style="display:flex; gap:6px; align-items:center; flex-shrink:0;">
+                            <button onclick="${h.kind === 'pay' ? `openPaymentModal('${h.id}')` : `openPurchaseModal(null,'${h.id}')`}" style="background:none; border:1.5px solid var(--border); color:var(--text); font-weight:700; padding:5px 10px; border-radius:8px; font-size:11px; width:auto; margin:0;">Edit</button>
+                            <button onclick="${h.kind === 'pay' ? 'deletePayment' : 'deletePurchase'}('${h.id}')" style="background:none; border:none; color:#C62828; font-size:16px; padding:0; width:auto; box-shadow:none; margin:0;">✕</button></div>` : '';
+                        html += `<div style="display:flex; justify-content:space-between; align-items:center; gap:8px; padding:6px 0; border-top:1px solid #eee; font-size:12.5px; color:${h.color};">
+                            <div style="min-width:0;">${h.kind === 'pay' ? '💳 ' : h.kind === 'pur' ? '🛒 ' : ''}${h.txt}
+                            <div style="font-size:10.5px; color:var(--text2);">${_rpEsc(hd)}${h.note ? ' · ' + _rpEsc(h.note) : ''}</div></div>${acts}</div>`;
                     });
-                    if (hist.length > 40) html += `<div class="note" style="margin-top:6px;">Showing latest 40 of ${hist.length} entries.</div>`;
+                    if (hist.length > 40) html += `<div onclick="pmSupHistToggle('${_rpEsc(p.id)}')" class="note" style="margin-top:8px; font-weight:700; cursor:pointer;">${_pmSupHistAll[p.id] ? '▴ Show latest 40 only' : '▾ Show all ' + hist.length + ' entries'}</div>`;
                 }
                 html += '</div>';
             }
