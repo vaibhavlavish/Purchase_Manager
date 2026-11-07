@@ -1232,10 +1232,10 @@ function computeCombinedAvgRate(metal){
                     💳 <b>${_rpEsc(getPartyName(x.partyId))}</b>${x.source === 'adjust' ? ' <span style="font-size:10.5px; color:var(--text2);">⚖ balance adjustment</span>' : ''} · ${amt ? `${_pmRs(x.amount)} <span style="color:#2E7D32;">(payment — amount)</span>` : `${x.metal} · ${(x.weight || 0).toFixed(2)}g ${x.rate > 0 ? '@ ₹' + x.rate.toFixed(2) + '/g' : '(in metal)'} <span style="color:#2E7D32;">(payment)</span>`}
                     <div style="font-size:10.5px; color:var(--text2);">${x.date || ''}${x.note ? ' · ' + _rpEsc(x.note) : ''}</div>
                 </div>
-                <div style="display:flex; align-items:center; gap:8px; flex-shrink:0;">
+                ${x.source === 'pos' ? '<div style="font-size:10px; font-weight:700; color:var(--text2); flex-shrink:0;">via POS</div>' : `<div style="display:flex; align-items:center; gap:8px; flex-shrink:0;">
                     ${x.source === 'adjust' ? '' : `<button onclick="openPaymentModal('${x.id}')" title="Edit" style="background:none; border:1.5px solid var(--border); color:var(--text); font-weight:700; padding:5px 10px; border-radius:8px; font-size:11px; width:auto; margin:0;">Edit</button>`}
                     <button onclick="deletePayment('${x.id}')" title="Remove" style="background:none; border:none; color:#C62828; font-size:16px; padding:0; width:auto; box-shadow:none; margin:0;">✕</button>
-                </div>
+                </div>`}
             </div>`;
     }
     function _pmMonthLabel(m){
@@ -4551,7 +4551,7 @@ function computeCombinedAvgRate(metal){
                 ? `Payment · ${_pmRs(x.amount)}`
                 : `Payment · ${x.metal} ${(x.weight || 0).toFixed(2)}g ${x.rate ? '@ ' + _pmRs(x.rate) + '/g' : '(in metal)'}`;
             if (x.source === 'adjust') txt = x.payType === 'amount' ? `Balance adjustment · owes ${_pmRs(x.amount)} less` : `Balance adjustment · owes ${(x.weight || 0).toFixed(2)}g ${x.metal} less`;
-            items.push({ t: x.createdAt, date: x.date, color: '#2E7D32', txt, note: x.note, kind: 'pay', adj: x.source === 'adjust', id: x.id });
+            items.push({ t: x.createdAt, date: x.date, color: '#2E7D32', txt, note: x.note, kind: 'pay', adj: x.source === 'adjust', id: x.id, pos: x.source === 'pos' });
         });
         d.piece.forEach(r => {
             const isPay = r.kind === 'payment';
