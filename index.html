@@ -1055,6 +1055,7 @@
     }
     // Who a purchase was bought from. Old jewellery bought via the POS ledger has no supplier.
     function _pmPurWho(p){
+        if (p && p.source === 'pos-adhoc') return (p.acctName ? String(p.acctName).replace(/&/g,'&amp;').replace(/</g,'&lt;') : 'Supplier');
         if (p && p.source === 'pos-oj') return 'Old jewellery' + (p.acctName ? ' · ' + String(p.acctName).replace(/&/g,'&amp;').replace(/</g,'&lt;') : '');
         return getPartyName(p && p.partyId);
     }
@@ -1173,7 +1174,7 @@ function computeCombinedAvgRate(metal){
             if (!booked) return;
             const pnl = (booked.rate - p.rate) * (p.weight || 0);
             totalPnl += pnl;
-            rows.push({ label: `${_pmPurWho(p)} — ${booked.label}`, metal: p.metal, weight: p.weight, rate: p.rate, bookedRate: booked.rate, pnl });
+            rows.push({ label: `${_pmPurWho(p)} — ${booked.label}`, metal: p.metal, weight: p.weight, rate: p.rate, bookedRate: booked.rate, pnl, date: p.date, t: p.createdAt });
         });
         payments.forEach(pay => {
             if (!pay.rate) return;
@@ -1182,8 +1183,9 @@ function computeCombinedAvgRate(metal){
             if (!booked) return;
             const pnl = (booked.rate - pay.rate) * (pay.weight || 0);
             totalPnl += pnl;
-            rows.push({ label: `${getPartyName(pay.partyId)} — ${booked.label} (credit)`, metal: pay.metal, weight: pay.weight, rate: pay.rate, bookedRate: booked.rate, pnl });
+            rows.push({ label: `${getPartyName(pay.partyId)} — ${booked.label} (credit)`, metal: pay.metal, weight: pay.weight, rate: pay.rate, bookedRate: booked.rate, pnl, date: pay.date, t: pay.createdAt });
         });
+        rows.sort((a, b) => (new Date(b.t) || 0) - (new Date(a.t) || 0));   // newest first
         return { totalPnl, rows };
     }
 
@@ -1210,7 +1212,7 @@ function computeCombinedAvgRate(metal){
 
     function _purchaseRow(p){
         const partyName = _pmPurWho(p);
-        const fromPos = p.source === 'pos-oj' || p.source === 'pos';
+        const fromPos = p.source === 'pos-oj' || p.source === 'pos' || p.source === 'pos-adhoc';
         return `
             <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; background:var(--surface); border-radius:var(--radius); padding:10px 14px; margin-bottom:8px; box-shadow:0 1px 6px rgba(0,0,0,.06); ${p.status === 'credit' ? 'border-left:3px solid #FB8C00;' : ''}">
                 <div style="font-size:12.5px;">
@@ -1352,7 +1354,7 @@ function computeCombinedAvgRate(metal){
                 ${_avgHtml}
                 ${activeRows.length ? activeRows.map(r => `
                     <div style="display:flex; justify-content:space-between; font-size:12px; padding:4px 0; border-top:1px solid var(--border);">
-                        <span style="color:var(--text2);">${r.label} · ${r.weight.toFixed(2)}g<br><span style="font-size:10.5px;">Paid ₹${r.rate.toFixed(2)}/g vs booked ₹${r.bookedRate.toFixed(2)}/g</span></span>
+                        <span style="color:var(--text2);">${r.label} · ${r.weight.toFixed(2)}g<br><span style="font-size:10.5px;">Paid ₹${r.rate.toFixed(2)}/g vs booked ₹${r.bookedRate.toFixed(2)}/g${r.date ? ' · ' + r.date : ''}</span></span>
                         <span style="font-weight:700; color:${r.pnl >= 0 ? '#2E7D32' : '#C62828'}; white-space:nowrap;">${r.pnl >= 0 ? '+' : ''}₹${r.pnl.toFixed(2)}</span>
                     </div>
                 `).join('') : `<div style="font-size:12px; color:var(--text2); padding:6px 0;">No ${_hedgePnlTab.toLowerCase()} entries.</div>`}`;
@@ -1810,7 +1812,7 @@ function computeCombinedAvgRate(metal){
 
     async function deletePurchase(id){
         const _pu = purchases.find(p => p.id === id);
-        if (_pu && (_pu.source === 'pos-oj' || _pu.source === 'pos')) { showCustomAlert('This purchase comes from an entry in the POS ledger. Delete that ledger entry in the POS instead.'); return; }
+        if (_pu && (_pu.source === 'pos-oj' || _pu.source === 'pos' || _pu.source === 'pos-adhoc')) { showCustomAlert('This purchase comes from an entry in the POS ledger. Delete that ledger entry in the POS instead.'); return; }
         const _puTxt = _pu ? ` (${getPartyName(_pu.partyId)}${_pu.weight ? ' · ' + _pu.weight + 'g' : ''}${_pu.amount ? ' · ₹' + Math.round(_pu.amount).toLocaleString('en-IN') : ''})` : '';
         const _puImp = !_pu ? '' : (_pu.status === 'credit' ? _pmImpactHtml(_pu.partyId, _pu.track, id, null)
             : `<div style="margin-top:10px; font-size:12.5px; text-align:left;">This was a paid purchase, so no supplier balance changes. It is removed from the metal-bought totals, so "to buy" goes up by ${(_pu.weight || 0).toFixed(2)}g.</div>`);
@@ -4544,7 +4546,7 @@ function computeCombinedAvgRate(metal){
             else if (p.status === 'paid') txt = `Purchase · ${p.metal} ${(p.weight || 0).toFixed(2)}g @ ${_pmRs(p.rate)}/g${p.planId ? ' <span style="color:var(--text2);">(plan)</span>' : ''}`;
             else txt = `Purchase · ${p.metal} ${(p.weight || 0).toFixed(2)}g <span style="color:#FB8C00;">on credit</span>`;
             if (p.source === 'adjust') txt = p.creditType === 'amount' ? `Balance adjustment · owes ${_pmRs(p.amount)} more` : `Balance adjustment · owes ${(p.weight || 0).toFixed(2)}g ${p.metal} more`;
-            items.push({ t: p.createdAt, date: p.date, color: '#1C1C1E', txt, note: p.note, kind: 'pur', adj: p.source === 'adjust', id: p.id, pos: p.source === 'pos-oj' || p.source === 'pos' });
+            items.push({ t: p.createdAt, date: p.date, color: '#1C1C1E', txt, note: p.note, kind: 'pur', adj: p.source === 'adjust', id: p.id, pos: p.source === 'pos-oj' || p.source === 'pos' || p.source === 'pos-adhoc' });
         });
         d.pay.forEach(x => {
             let txt = x.payType === 'amount'
