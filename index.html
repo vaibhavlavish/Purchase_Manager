@@ -271,6 +271,7 @@
     <div id="pm-more-menu">
         <button onclick="pmMoreGo(pmSupOpen)">👥 Supplier list</button>
         <button onclick="pmMoreGo(pmPurityOpen)">⚗ Purity % per stamp</button>
+        <button onclick="pmMoreGo(pmAliasOpen)">🔗 Treat names as one</button>
         <button onclick="pmMoreGo(() => location.reload())">🔄 Refresh</button>
         <div class="sep"></div>
         <button onclick="pmMoreGo(pmAvOpen)">🗄 Archive viewer</button>
@@ -718,6 +719,8 @@
     let rates = { gold: {}, silver: {} };
     let baseCalcDefaults = {};
     let pmPurity = {};      // PM-only override: { gold: { '22K': 91.6 }, silver: { '925': 92.5 } } — pure-metal % per stamp
+    let invItemSettings = {};   // POS item settings (read-only): stock item name -> { printName, hsn }
+    let itemAliases = {};   // hand-made 'treat these names as one': KEY(from) -> { from, to } (pmMeta/itemAliases)
     let buyHidden = {};   // Purchase helper rows the user hid (pmMeta/buyHidden, shared across devices)
     let returnedBarcodes = {}, issuedBarcodes = {};   // tags returned to stock / issued out of stock (read-only, set by the POS)
     let taxRateCfg = 3; // global tax % — only a fallback when an invoice has no taxable amount to derive its own rate from
@@ -739,6 +742,8 @@
             rates = val.rates || { gold: {}, silver: {} };
             baseCalcDefaults = val.baseCalcDefaults || {};
             taxRateCfg = (typeof val.taxRate === 'number') ? val.taxRate : 3;
+            invItemSettings = {};
+            Object.keys(val.invItemSettings || {}).forEach(k => { let n = k; try { n = decodeURIComponent(k); } catch (e) {} invItemSettings[n] = val.invItemSettings[k]; });
             returnedBarcodes = val.returnedBarcodes || {};
             issuedBarcodes = val.issuedBarcodes || {};
             _pmRerenderSoon();
@@ -759,6 +764,11 @@
         }, err => console.error('[PmSales] read error', err));
 
         // Per-stamp pure-metal % overrides (set from More › Purity % per stamp). PM-owned node.
+        window.dbOnValue(window.dbRef(window.firebaseDB, 'pmMeta/itemAliases'), snap => {
+            itemAliases = snap.val() || {};
+            _pmRerenderSoon();
+        }, err => console.error('[ItemAliases] read error', err));
+
         window.dbOnValue(window.dbRef(window.firebaseDB, 'pmMeta/buyHidden'), snap => {
             buyHidden = snap.val() || {};
             _pmRerenderSoon();
@@ -1289,6 +1299,46 @@ function computeCombinedAvgRate(metal){
         set(piece, !piece || !piece.innerHTML.trim());
     }
 
+
+    // Name for a sold line. Older invoices only kept the printed label ("Gold Ring") and the tag is gone from stock,
+    // so the same product splits in two. If the name is not a real stock item name and the tag's letters (e.g. GRG)
+    // belong to exactly one item name in current stock, use that name. Ambiguous prefixes are left alone.
+    let _pmPfxSrc = null, _pmPfx = {}, _pmStockNames = new Set();
+    function _pmCanonName(item, name) {
+        name = _pmPrintToItem(name);
+        if (_pmPfxSrc !== productData) {
+            _pmPfxSrc = productData; _pmPfx = {}; _pmStockNames = new Set();
+            Object.keys(productData).forEach(bc => {
+                const n = String((productData[bc] || {}).itemName || '').trim(); if (!n) return;
+                _pmStockNames.add(n.toUpperCase());
+                const pre = (bc.match(/^[A-Za-z]+/) || [''])[0].toUpperCase(); if (pre.length < 2) return;
+                if (!(pre in _pmPfx)) _pmPfx[pre] = n; else if (_pmPfx[pre] !== n) _pmPfx[pre] = null;
+            });
+        }
+        const bc = item && item.barcode;
+        if (!bc || productData[bc] || _pmStockNames.has(String(name).toUpperCase())) return name;
+        const pre = (String(bc).match(/^[A-Za-z]+/) || [''])[0].toUpperCase();
+        return (pre.length >= 2 && _pmPfx[pre]) || name;
+    }
+
+    // Invoices print the POS "print name" (G EARRING prints as "Gold Earrings"). Older sold lines only kept that label,
+    // so map it back to the real stock item name when exactly one item uses that print name.
+    let _pmPrintSrc = null, _pmPrintMap = {};
+    function _pmPrintToItem(n) {
+        if (_pmPrintSrc !== invItemSettings) {
+            _pmPrintSrc = invItemSettings; _pmPrintMap = {};
+            Object.keys(invItemSettings).forEach(item => {
+                const pn = String((invItemSettings[item] || {}).printName || '').trim().toUpperCase();
+                if (!pn || pn === item.toUpperCase()) return;
+                _pmPrintMap[pn] = (pn in _pmPrintMap) ? null : item;
+            });
+        }
+        return _pmPrintMap[String(n || '').trim().toUpperCase()] || n;
+    }
+    const _alKey = n => String(n || '').trim().toUpperCase().replace(/[.$#\[\]\/]/g, '_');
+    function _pmAlias(n) { n = _pmPrintToItem(n); const a = itemAliases[_alKey(n)]; return (a && a.to) ? a.to : n; }
+    function _pmItemName(item, name) { return _pmAlias(_pmCanonName(item, name)); }
+
     // ── Purchase helper (Track B only) ─────────────────────────────────────────
     // What to buy = recent sell rate (all tracks — stock is physical) x target cover days, minus stock in hand.
     // Stock = POS tag list (productData, refreshed by Fetch Tags from MMI) minus tags already sold / issued.
@@ -1329,7 +1379,7 @@ function computeCombinedAvgRate(metal){
                 const bc = it.barcode || '';
                 if (bc && (!lastSale[bc] || t > lastSale[bc])) lastSale[bc] = t;
                 if (!bc) {   // untagged (loose / typed-in) sale: no tag stock to compare against, so listed separately, never suggested
-                    const lm = getInvoiceItemPureGrams(it), ln = String(it.itemName || it.desc || '').trim();
+                    const lm = getInvoiceItemPureGrams(it), ln = _pmAlias(String(it.itemName || it.desc || '').trim());
                     if (lm && ln && (now - t) / D <= 90) {
                         const l = loose[lm.metal + '|' + ln.toLowerCase()] || (loose[lm.metal + '|' + ln.toLowerCase()] = { metal: lm.metal, name: ln, pcs: 0, g: 0 });
                         l.pcs += it.pc || 1; l.g += it.nlWt || 0;
@@ -1338,7 +1388,8 @@ function computeCombinedAvgRate(metal){
                 }
                 const mw = getInvoiceItemPureGrams(it); if (!mw) return;
                 const pd = (bc && productData[bc]) || {};
-                const name = String(it.itemName || pd.itemName || it.desc || '').trim(); if (!name) return;
+                let name = String(it.itemName || pd.itemName || it.desc || '').trim(); if (!name) return;
+                name = _pmItemName(it, name);
                 const pcs = it.pc || 1, wt = it.nlWt || 0, age = (now - t) / D;
                 if (age <= 90) {
                     const c = mk(mw.metal, it.stamp || pd.stamp, name);
@@ -1361,7 +1412,7 @@ function computeCombinedAvgRate(metal){
         Object.keys(productData).forEach(bc => {
             const p = productData[bc]; if (!p) return;
             const metal = _normMetal(p.metal); if (metal !== 'Gold' && metal !== 'Silver') return;
-            const name = String(p.itemName || '').trim(); if (!name) return;
+            const name = _pmAlias(String(p.itemName || '').trim()); if (!name) return;
             if (issuedBarcodes[bc]) return;
             const td = p.tagDate ? new Date(p.tagDate).getTime() : 0;
             const sold = lastSale[bc] && !returnedBarcodes[bc] && (!td || td <= lastSale[bc]);   // sold (and not a reused number)
@@ -3033,7 +3084,7 @@ function computeCombinedAvgRate(metal){
                 const _w = (_salesWtMode === 'fine' && mw) ? mw.weight : (item.nlWt || 0);   // follows the Sales tab Weight / Fine toggle
                 if (mw) grams[mw.metal] += _w;
                 const pd = (item.barcode && productData[item.barcode]) || {};
-                const name = String(item.itemName || pd.itemName || (item.desc || 'Unnamed Item')).trim();
+                const name = _pmItemName(item, String(item.itemName || pd.itemName || (item.desc || 'Unnamed Item')).trim());
                 const custom = !!item.isCustom;
                 const metal = custom ? ('Custom:' + _ciCat(item)) : (mw ? mw.metal : _normMetal(item.metal || pd.metal));
                 const key = metal + '|' + name.toLowerCase();
@@ -3435,9 +3486,9 @@ function computeCombinedAvgRate(metal){
                     gramsRawByStamp[mw.metal][stampKey] = (gramsRawByStamp[mw.metal][stampKey] || 0) + _rw;
                 }
 
-                const actualName = item.itemName
+                const actualName = _pmItemName(item, item.itemName
                     || (item.barcode && productData[item.barcode] && productData[item.barcode].itemName)
-                    || (item.desc || 'Unnamed Item').trim();
+                    || (item.desc || 'Unnamed Item').trim());
                 // Custom items get their own section in the item-wise list (not "Other")
                 const isCustom = !!item.isCustom;
                 const key = isCustom ? ('custom|' + _ciCat(item) + '|' + actualName) : (metal + '|' + stamp + '|' + actualName);
@@ -4571,6 +4622,51 @@ function computeCombinedAvgRate(metal){
         h += '</div><div id="pm-pur-msg" class="note" style="min-height:14px; margin-top:6px; color:#C62828;"></div></div>';
         _pmSetModal('Purity % per stamp', h, _pmPopWrap(_pmBtn('Save', 'pmPuritySave()') + _pmBtn('Close', 'closePmAlert()', 'ghost')));
     }
+
+    // ── Treat names as one (More menu) ───────────────────────────────────────
+    // Hand-made merge list. Every report and the Purchase helper count the "from" name under the "to" name.
+    function pmAliasOpen() {
+        if (_pmAvBlocked()) return;
+        const names = new Set();
+        Object.values(productData).forEach(p => { if (p && p.itemName) names.add(String(p.itemName).trim()); });
+        _pmSalesSrc().forEach(inv => (inv.items || []).forEach(i => { if (i && !i.isCustom) { const n = String(i.itemName || i.desc || '').trim(); if (n) names.add(n); } }));
+        const dl = Array.from(names).sort((a, b) => a.localeCompare(b)).map(n => '<option value="' + _rpEsc(n) + '">').join('');
+        const inp = 'margin:0; width:100%; padding:9px 10px; border:1.5px solid var(--border); border-radius:8px; font-size:14px; box-sizing:border-box;';
+        const rows = Object.keys(itemAliases).map(k => itemAliases[k]).filter(a => a && a.from && a.to).sort((a, b) => a.from.localeCompare(b.from));
+        let h = '<div style="text-align:left; font-size:13px;"><p class="note" style="margin:0 0 8px;">Pick two names that are really the same item. Sales and the Purchase helper then count the first name under the second. Past sales are included. Nothing on invoices changes.</p>' +
+            '<datalist id="pm-al-names">' + dl + '</datalist>' +
+            '<label style="font-size:11px; font-weight:700; color:var(--text2);">This name</label><input id="pm-al-from" list="pm-al-names" placeholder="e.g. Gold Ring" autocomplete="off" style="' + inp + '">' +
+            '<label style="font-size:11px; font-weight:700; color:var(--text2); display:block; margin-top:8px;">counts as</label><input id="pm-al-to" list="pm-al-names" placeholder="e.g. G RING" autocomplete="off" style="' + inp + '">' +
+            '<div id="pm-al-msg" class="note" style="min-height:14px; margin-top:6px; color:#C62828;"></div>' +
+            '<div style="max-height:30vh; overflow:auto; margin-top:6px;">' +
+            (rows.length ? rows.map(a => '<div style="display:flex; align-items:center; gap:8px; padding:6px 0; border-top:1px solid #eee;"><span style="flex:1;">' + _rpEsc(a.from) + ' → <b>' + _rpEsc(a.to) + '</b></span><button onclick="pmAliasDel(\'' + encodeURIComponent(_alKey(a.from)).replace(/'/g, '%27') + '\')" style="margin:0; width:auto; padding:4px 10px; font-size:11px; box-shadow:none;">Remove</button></div>').join('') : '<div class="note">No merges yet.</div>') +
+            '</div></div>';
+        _pmSetModal('Treat names as one', h, _pmPopWrap(_pmBtn('Add', 'pmAliasAdd()') + _pmBtn('Close', 'closePmAlert()', 'ghost')));
+    }
+    async function pmAliasAdd() {
+        const msg = t => { const el = document.getElementById('pm-al-msg'); if (el) el.textContent = t; };
+        if (!window._writeAllowed) { msg('This copy is read-only, so saving is skipped. Open the official app to save.'); return; }
+        const from = (document.getElementById('pm-al-from').value || '').trim(), to0 = (document.getElementById('pm-al-to').value || '').trim();
+        if (!from || !to0) { msg('Fill in both names.'); return; }
+        const to = _pmAlias(to0);   // follow one hop so merges never chain
+        if (_alKey(from) === _alKey(to)) { msg('Those are the same name already.'); return; }
+        const upd = {}; upd[_alKey(from)] = { from, to, ts: Date.now() };
+        // anything already merged INTO "from" now points at the final name
+        Object.keys(itemAliases).forEach(k => { const a = itemAliases[k]; if (a && _alKey(a.to) === _alKey(from)) upd[k] = Object.assign({}, a, { to }); });
+        try {
+            await window.dbUpdate(window.dbRef(window.firebaseDB, 'pmMeta/itemAliases'), upd);
+            Object.keys(upd).forEach(k => { itemAliases[k] = upd[k]; });
+            _pmRerenderActiveTab(); pmAliasOpen(); invToast('✅ Merged');
+        } catch (e) { console.error('[PM alias] save failed', e); msg('Could not save: ' + (e && e.message ? e.message : e)); }
+    }
+    async function pmAliasDel(enc) {
+        const k = decodeURIComponent(enc);
+        try {
+            await window.dbUpdate(window.dbRef(window.firebaseDB, 'pmMeta/itemAliases'), { [k]: null });
+            delete itemAliases[k]; _pmRerenderActiveTab(); pmAliasOpen();
+        } catch (e) { console.error('[PM alias] remove failed', e); invToast('Could not remove'); }
+    }
+
     async function pmPuritySave() {
         const msg = t => { const el = document.getElementById('pm-pur-msg'); if (el) el.textContent = t; };
         if (_pmAvBlocked()) return;
