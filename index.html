@@ -1312,7 +1312,7 @@ function computeCombinedAvgRate(metal){
     function _bhSetMetal(m) { _bhMetal = m; renderBuyHelper(true); }
     function _bhCompute() {
         const D = 86400000, now = Date.now(), H = _bhDays;
-        const cat = {}, lastSale = {}, batchSeen = {};   // batch = tags dated in the last 90 days
+        const cat = {}, lastSale = {}, batchSeen = {}, loose = {};   // batch = tags dated in the last 90 days
         const yi = { Gold: { ly: 0, base: 0 }, Silver: { ly: 0, base: 0 } };
         let firstSale = now;
         const mk = (metal, stamp, name) => {
@@ -1328,6 +1328,14 @@ function computeCombinedAvgRate(metal){
                 if (it.isCustom) return;
                 const bc = it.barcode || '';
                 if (bc && (!lastSale[bc] || t > lastSale[bc])) lastSale[bc] = t;
+                if (!bc) {   // untagged (loose / typed-in) sale: no tag stock to compare against, so listed separately, never suggested
+                    const lm = getInvoiceItemPureGrams(it), ln = String(it.itemName || it.desc || '').trim();
+                    if (lm && ln && (now - t) / D <= 90) {
+                        const l = loose[lm.metal + '|' + ln.toLowerCase()] || (loose[lm.metal + '|' + ln.toLowerCase()] = { metal: lm.metal, name: ln, pcs: 0, g: 0 });
+                        l.pcs += it.pc || 1; l.g += it.nlWt || 0;
+                    }
+                    return;
+                }
                 const mw = getInvoiceItemPureGrams(it); if (!mw) return;
                 const pd = (bc && productData[bc]) || {};
                 const name = String(it.itemName || pd.itemName || it.desc || '').trim(); if (!name) return;
@@ -1366,7 +1374,7 @@ function computeCombinedAvgRate(metal){
                 if (!c.oldest || p.tagDate < c.oldest) c.oldest = p.tagDate;
             }
         });
-        return { cat: Object.values(cat), idx };
+        return { cat: Object.values(cat), idx, loose: Object.values(loose) };
     }
     function renderBuyHelper(force) {
         const sec = document.getElementById('pm-bh-sec'); if (!sec) return;
@@ -1375,7 +1383,7 @@ function computeCombinedAvgRate(metal){
         const body = document.getElementById('pm-bh-body');
         if (!force && body.contains(document.activeElement) && document.activeElement.tagName === 'INPUT') return;
         const E = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-        const { cat, idx } = _bhCompute();
+        const { cat, idx, loose } = _bhCompute();
         const H = _bhDays, mult = idx[_bhMetal] * _bhBoost, dayMs = 86400000;
         const rows = cat.filter(c => c.metal === _bhMetal).map(c => {
             const rate = c.sold90 / 90 * mult;
@@ -1385,6 +1393,7 @@ function computeCombinedAvgRate(metal){
             return Object.assign(c, { rate, need, cover, avgW });
         });
         const buy = rows.filter(r => r.need > 0 && r.sold90 >= 2 && !buyHidden[r.key]).sort((a, b) => a.cover - b.cover).slice(0, 40);
+        const looseRows = loose.filter(l => l.metal === _bhMetal).sort((a, b) => b.pcs - a.pcs);
         const hiddenRows = rows.filter(r => buyHidden[r.key]);
         const dead = rows.filter(r => r.stock > 0 && r.sold90 === 0).sort((a, b) => (a.oldest || '9') < (b.oldest || '9') ? -1 : 1).slice(0, 25);
         const recent = r => r.lastBought && (Date.now() - new Date(r.lastBought).getTime()) / dayMs <= 14;
@@ -1398,10 +1407,11 @@ function computeCombinedAvgRate(metal){
         body.innerHTML = `
             <div style="display:flex; gap:8px; margin-bottom:8px;">${tabBtn('Gold')}${tabBtn('Silver')}</div>
             <div style="display:flex; gap:8px; margin-bottom:6px;">${inp('Cover days', 'bh-days', H, 1, "_bhSet('days', this.value)")}${inp('Season boost ×', 'bh-boost', _bhBoost, 0.05, "_bhSet('boost', this.value)")}</div>
-            <div style="font-size:10.5px; color:var(--text2); margin-bottom:6px;">Demand = last 90 days × ${mult.toFixed(2)}${idx[_bhMetal] !== 1 ? ' (incl. ×' + idx[_bhMetal].toFixed(2) + ' from last year’s same period)' : ''}. Both tracks’ sales counted; tagged items only.</div>
+            <div style="font-size:10.5px; color:var(--text2); margin-bottom:6px;">Demand = last 90 days × ${mult.toFixed(2)}${idx[_bhMetal] !== 1 ? ' (incl. ×' + idx[_bhMetal].toFixed(2) + ' from last year’s same period)' : ''}. Both tracks’ sales counted; suggestions cover tagged items only.</div>
             <div style="font-size:12px; font-weight:800; margin:8px 0 0;">To buy (${buy.length})</div>
             ${buy.length ? buy.map(line).join('') : '<p class="note" style="margin:6px 0;">Nothing short at ' + H + ' days of cover.</p>'}
             ${hiddenRows.length ? `<details class="pm-more-info" style="margin-top:10px;"><summary>Hidden suggestions (${hiddenRows.length})</summary>${hiddenRows.map(r => `<div style="display:flex; justify-content:space-between; align-items:center; padding:6px 0; border-top:1px solid var(--border); font-size:12px;"><span>${nm(r)}</span><button onclick="_bhHide('${encodeURIComponent(r.key).replace(/'/g, '%27')}', false)" style="margin:0; width:auto; padding:4px 10px; font-size:11px; box-shadow:none;">Restore</button></div>`).join('')}</details>` : ''}
+            ${looseRows.length ? `<details class="pm-more-info" style="margin-top:10px;"><summary>Sold without a tag — loose / typed-in (${looseRows.length})</summary><div style="font-size:10.5px; color:var(--text2); padding:4px 0;">No tag stock to compare, so no buy suggestion. Last 90 days.</div>${looseRows.map(l => `<div style="display:flex; justify-content:space-between; padding:6px 0; border-top:1px solid var(--border); font-size:12px;"><span>${E(l.name)}</span><span style="color:var(--text2); white-space:nowrap;">${l.pcs} pcs · ${l.g.toFixed(2)}g</span></div>`).join('')}</details>` : ''}
             ${dead.length ? `<details class="pm-more-info" style="margin-top:10px;"><summary>Don’t buy — stock with no sales in 90 days (${dead.length})</summary>${dead.map(r => `<div style="display:flex; justify-content:space-between; padding:6px 0; border-top:1px solid var(--border); font-size:12px;"><span>${nm(r)}</span><span style="color:var(--text2); white-space:nowrap;">${r.stock} pcs${r.oldest ? ' · since ' + E(r.oldest) : ''}</span></div>`).join('')}</details>` : ''}`;
     }
 
