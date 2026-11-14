@@ -378,6 +378,9 @@
             <details class="pm-sec" style="display:none;"><summary>🧩 Per-piece supplies</summary>
                 <div id="piece-supplies-card"></div>
             </details>
+            <details class="pm-sec" id="pm-bh-sec" style="display:none;" ontoggle="renderBuyHelper()"><summary>🛍️ Purchase helper</summary>
+                <div id="pm-bh-body" style="padding:4px 0 6px;"></div>
+            </details>
         </div>
     </div>
 </div>
@@ -715,6 +718,8 @@
     let rates = { gold: {}, silver: {} };
     let baseCalcDefaults = {};
     let pmPurity = {};      // PM-only override: { gold: { '22K': 91.6 }, silver: { '925': 92.5 } } — pure-metal % per stamp
+    let buyHidden = {};   // Purchase helper rows the user hid (pmMeta/buyHidden, shared across devices)
+    let returnedBarcodes = {}, issuedBarcodes = {};   // tags returned to stock / issued out of stock (read-only, set by the POS)
     let taxRateCfg = 3; // global tax % — only a fallback when an invoice has no taxable amount to derive its own rate from
     let parties = [];
     let purchases = [];
@@ -734,6 +739,8 @@
             rates = val.rates || { gold: {}, silver: {} };
             baseCalcDefaults = val.baseCalcDefaults || {};
             taxRateCfg = (typeof val.taxRate === 'number') ? val.taxRate : 3;
+            returnedBarcodes = val.returnedBarcodes || {};
+            issuedBarcodes = val.issuedBarcodes || {};
             _pmRerenderSoon();
         }, err => console.error('[Config] read error', err));
 
@@ -752,6 +759,11 @@
         }, err => console.error('[PmSales] read error', err));
 
         // Per-stamp pure-metal % overrides (set from More › Purity % per stamp). PM-owned node.
+        window.dbOnValue(window.dbRef(window.firebaseDB, 'pmMeta/buyHidden'), snap => {
+            buyHidden = snap.val() || {};
+            _pmRerenderSoon();
+        }, err => console.error('[BuyHidden] read error', err));
+
         window.dbOnValue(window.dbRef(window.firebaseDB, 'pmPurity'), snap => {
             pmPurity = snap.val() || {};
             _pmRerenderSoon();
@@ -1276,8 +1288,126 @@ function computeCombinedAvgRate(metal){
         set(plans, !plans || plans.style.display === 'none');
         set(piece, !piece || !piece.innerHTML.trim());
     }
+
+    // ── Purchase helper (Track B only) ─────────────────────────────────────────
+    // What to buy = recent sell rate (all tracks — stock is physical) x target cover days, minus stock in hand.
+    // Stock = POS tag list (productData, refreshed by Fetch Tags from MMI) minus tags already sold / issued.
+    // A tag dated AFTER its last sale is a reused tag number (new stock), so it still counts as stock.
+    let _bhMetal = 'Gold';
+    let _bhDays = parseInt(localStorage.getItem('pmBhDays'), 10) || 45;
+    let _bhBoost = parseFloat(localStorage.getItem('pmBhBoost')) || 1;
+    function _bhSet(k, v) {
+        v = parseFloat(v); if (!(v > 0)) return;
+        if (k === 'days') { _bhDays = Math.round(v); localStorage.setItem('pmBhDays', _bhDays); }
+        else { _bhBoost = v; localStorage.setItem('pmBhBoost', v); }
+        renderBuyHelper(true);
+    }
+    async function _bhHide(enc, on) {
+        const k = decodeURIComponent(enc);
+        if (on) buyHidden[k] = true; else delete buyHidden[k];   // instant on this screen
+        renderBuyHelper(true);
+        try { await window.dbUpdate(window.dbRef(window.firebaseDB, 'pmMeta/buyHidden'), { [k]: on ? true : null }); }
+        catch (e) { console.error(e); invToast('Could not save — hidden only on this screen'); }
+    }
+    function _bhSetMetal(m) { _bhMetal = m; renderBuyHelper(true); }
+    function _bhCompute() {
+        const D = 86400000, now = Date.now(), H = _bhDays;
+        const cat = {}, lastSale = {}, batchSeen = {};   // batch = tags dated in the last 90 days
+        const yi = { Gold: { ly: 0, base: 0 }, Silver: { ly: 0, base: 0 } };
+        let firstSale = now;
+        const mk = (metal, stamp, name) => {
+            if (metal === 'Silver') stamp = '';   // silver stamps differ between tags and invoices (S7 / S925 / blank) — group silver by item name only
+            const k = metal + '|' + (stamp || '-') + '|' + name.toUpperCase();
+            return cat[k] || (cat[k] = { metal, stamp: stamp || '', name, sold30: 0, sold90: 0, g90: 0, stock: 0, stockG: 0, lastBought: '', oldest: '', bSold: 0, bNew: 0, key: k.replace(/[.$#\[\]\/]/g, '_') });
+        };
+        _pmSalesSrc().forEach(inv => {
+            if (inv.draft) return;
+            const t = new Date(inv.timestamp).getTime(); if (!t) return;
+            if (t < firstSale) firstSale = t;
+            (inv.items || []).forEach(it => {
+                if (it.isCustom) return;
+                const bc = it.barcode || '';
+                if (bc && (!lastSale[bc] || t > lastSale[bc])) lastSale[bc] = t;
+                const mw = getInvoiceItemPureGrams(it); if (!mw) return;
+                const pd = (bc && productData[bc]) || {};
+                const name = String(it.itemName || pd.itemName || it.desc || '').trim(); if (!name) return;
+                const pcs = it.pc || 1, wt = it.nlWt || 0, age = (now - t) / D;
+                if (age <= 90) {
+                    const c = mk(mw.metal, it.stamp || pd.stamp, name);
+                    c.sold90 += pcs; c.g90 += wt; if (age <= 30) c.sold30 += pcs;
+                    const tdMs = it.tagDate ? new Date(it.tagDate).getTime() : 0;   // saved on the invoice line at sale time
+                    if (tdMs && bc && (now - tdMs) / D <= 90) { c.bSold += pcs; batchSeen[bc] = 1; }
+                }
+                // last year's same-period uplift (metal level): window [today-365, +H] vs the 90 days before it
+                const ago = (now - t) / D - 365;                     // days after (today-365)
+                if (ago >= 0 && ago <= H) yi[mw.metal].ly += wt;
+                else if (ago < 0 && ago >= -90) yi[mw.metal].base += wt;
+            });
+        });
+        const idx = {};
+        ['Gold', 'Silver'].forEach(m => {
+            const y = yi[m];
+            idx[m] = ((now - firstSale) / D >= 455 && y.base > 0) ? Math.min(2.5, Math.max(0.7, (y.ly / H) / (y.base / 90))) : 1;
+        });
+        // stock in hand
+        Object.keys(productData).forEach(bc => {
+            const p = productData[bc]; if (!p) return;
+            const metal = _normMetal(p.metal); if (metal !== 'Gold' && metal !== 'Silver') return;
+            const name = String(p.itemName || '').trim(); if (!name) return;
+            if (issuedBarcodes[bc]) return;
+            const td = p.tagDate ? new Date(p.tagDate).getTime() : 0;
+            const sold = lastSale[bc] && !returnedBarcodes[bc] && (!td || td <= lastSale[bc]);   // sold (and not a reused number)
+            const c = mk(metal, p.stamp, name);
+            if (sold) { if (td && !batchSeen[bc] && (now - td) / D <= 90) c.bSold++; return; }   // older invoices have no tagDate: use the tag still listed
+            if (td && (now - td) / D <= 90) c.bNew++;
+            c.stock++; c.stockG += p.netWeight || 0;
+            if (p.tagDate) {
+                if (!c.lastBought || p.tagDate > c.lastBought) c.lastBought = p.tagDate;
+                if (!c.oldest || p.tagDate < c.oldest) c.oldest = p.tagDate;
+            }
+        });
+        return { cat: Object.values(cat), idx };
+    }
+    function renderBuyHelper(force) {
+        const sec = document.getElementById('pm-bh-sec'); if (!sec) return;
+        sec.style.display = currentInvTrack === 'B' ? '' : 'none';
+        if (currentInvTrack !== 'B' || !sec.open) return;
+        const body = document.getElementById('pm-bh-body');
+        if (!force && body.contains(document.activeElement) && document.activeElement.tagName === 'INPUT') return;
+        const E = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+        const { cat, idx } = _bhCompute();
+        const H = _bhDays, mult = idx[_bhMetal] * _bhBoost, dayMs = 86400000;
+        const rows = cat.filter(c => c.metal === _bhMetal).map(c => {
+            const rate = c.sold90 / 90 * mult;
+            const need = Math.max(0, Math.ceil(rate * H - c.stock));
+            const cover = rate > 0 ? c.stock / rate : Infinity;
+            const avgW = (c.sold90 && c.g90 > 0) ? c.g90 / c.sold90 : (c.stock ? c.stockG / c.stock : 0);
+            return Object.assign(c, { rate, need, cover, avgW });
+        });
+        const buy = rows.filter(r => r.need > 0 && r.sold90 >= 2 && !buyHidden[r.key]).sort((a, b) => a.cover - b.cover).slice(0, 40);
+        const hiddenRows = rows.filter(r => buyHidden[r.key]);
+        const dead = rows.filter(r => r.stock > 0 && r.sold90 === 0).sort((a, b) => (a.oldest || '9') < (b.oldest || '9') ? -1 : 1).slice(0, 25);
+        const recent = r => r.lastBought && (Date.now() - new Date(r.lastBought).getTime()) / dayMs <= 14;
+        const nm = r => E(r.name) + (r.stamp ? ' <span style="color:var(--text2);">' + E(r.stamp) + '</span>' : '');
+        const tabBtn = m => `<button onclick="_bhSetMetal('${m}')" style="flex:1; margin:0; padding:7px; border-radius:8px; font-size:12px; font-weight:700; box-shadow:none; ${_bhMetal === m ? 'background:var(--accent,#333); color:#fff; border:1.5px solid var(--accent,#333);' : 'background:none; color:var(--text2); border:1.5px solid var(--border);'}">${m === 'Gold' ? '🟡' : '⚪'} ${m}</button>`;
+        const inp = (lbl, id, val, step, fn) => `<label style="flex:1; font-size:10.5px; color:var(--text2); font-weight:700;">${lbl}<input type="number" min="0.1" step="${step}" value="${val}" onchange="${fn}" style="margin:2px 0 0; padding:6px 8px; font-size:13px;"></label>`;
+        const line = r => `<div style="display:flex; justify-content:space-between; gap:8px; padding:8px 0; border-top:1px solid var(--border); font-size:12px;">
+                <div style="min-width:0;"><div style="font-weight:700;">${nm(r)}</div>
+                <div style="color:var(--text2); font-size:10.5px;">sold ${r.sold90} in 90d (${r.sold30} in 30d) · stock ${r.stock}${r.cover === Infinity ? '' : ' · ' + Math.round(r.cover) + 'd cover'}${r.bSold + r.bNew ? ' · new in 90d: ' + r.bSold + ' of ' + (r.bSold + r.bNew) + ' sold' : ''}${r.lastBought ? ' · last bought ' + E(r.lastBought) : ''}${recent(r) ? ' <b style="color:#E65100;">· restocked recently</b>' : ''}</div></div>
+                <div style="display:flex; align-items:flex-start; gap:8px;"><div style="text-align:right; white-space:nowrap;"><div style="font-weight:800; color:#C62828;"><span style="color:var(--text2); font-weight:600;">have ${r.stock}</span> · buy ${r.need} pcs</div><div style="color:var(--text2); font-size:10.5px;">${r.avgW > 0 ? '≈ ' + (r.need * r.avgW).toFixed(1) + 'g' : ''}</div></div><button onclick="_bhHide('${encodeURIComponent(r.key).replace(/'/g, '%27')}', true)" title="Hide this suggestion" style="margin:0; width:24px; height:24px; padding:0; border-radius:50%; border:1px solid var(--border); background:none; color:var(--text2); font-size:12px; line-height:1; box-shadow:none;">✕</button></div></div>`;
+        body.innerHTML = `
+            <div style="display:flex; gap:8px; margin-bottom:8px;">${tabBtn('Gold')}${tabBtn('Silver')}</div>
+            <div style="display:flex; gap:8px; margin-bottom:6px;">${inp('Cover days', 'bh-days', H, 1, "_bhSet('days', this.value)")}${inp('Season boost ×', 'bh-boost', _bhBoost, 0.05, "_bhSet('boost', this.value)")}</div>
+            <div style="font-size:10.5px; color:var(--text2); margin-bottom:6px;">Demand = last 90 days × ${mult.toFixed(2)}${idx[_bhMetal] !== 1 ? ' (incl. ×' + idx[_bhMetal].toFixed(2) + ' from last year’s same period)' : ''}. Both tracks’ sales counted; tagged items only.</div>
+            <div style="font-size:12px; font-weight:800; margin:8px 0 0;">To buy (${buy.length})</div>
+            ${buy.length ? buy.map(line).join('') : '<p class="note" style="margin:6px 0;">Nothing short at ' + H + ' days of cover.</p>'}
+            ${hiddenRows.length ? `<details class="pm-more-info" style="margin-top:10px;"><summary>Hidden suggestions (${hiddenRows.length})</summary>${hiddenRows.map(r => `<div style="display:flex; justify-content:space-between; align-items:center; padding:6px 0; border-top:1px solid var(--border); font-size:12px;"><span>${nm(r)}</span><button onclick="_bhHide('${encodeURIComponent(r.key).replace(/'/g, '%27')}', false)" style="margin:0; width:auto; padding:4px 10px; font-size:11px; box-shadow:none;">Restore</button></div>`).join('')}</details>` : ''}
+            ${dead.length ? `<details class="pm-more-info" style="margin-top:10px;"><summary>Don’t buy — stock with no sales in 90 days (${dead.length})</summary>${dead.map(r => `<div style="display:flex; justify-content:space-between; padding:6px 0; border-top:1px solid var(--border); font-size:12px;"><span>${nm(r)}</span><span style="color:var(--text2); white-space:nowrap;">${r.stock} pcs${r.oldest ? ' · since ' + E(r.oldest) : ''}</span></div>`).join('')}</details>` : ''}`;
+    }
+
     function renderPurchaseTab(){
         renderPieceSupplies();
+        renderBuyHelper();
         const dateFieldEl = document.getElementById('hedge-sales-start-date');
         if (dateFieldEl && document.activeElement !== dateFieldEl) {
             dateFieldEl.value = getSalesHedgeStartDate(currentInvTrack).toISOString().slice(0, 10);
