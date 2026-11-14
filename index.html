@@ -1346,6 +1346,26 @@ function computeCombinedAvgRate(metal){
     let _bhMetal = 'Gold';
     let _bhDays = parseInt(localStorage.getItem('pmBhDays'), 10) || 45;
     let _bhBoost = parseFloat(localStorage.getItem('pmBhBoost')) || 1;
+    // Sales window the helper learns from: a rolling number of days, or custom from/to dates (_bhBack = 0)
+    let _bhBack = parseInt(localStorage.getItem('pmBhBack'), 10); if (isNaN(_bhBack)) _bhBack = 90;
+    let _bhFrom = localStorage.getItem('pmBhFrom') || '', _bhTo = localStorage.getItem('pmBhTo') || '';
+    function _bhWin() {
+        const D = 86400000, now = Date.now(), f = t => new Date(t).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: '2-digit' });
+        let s, e, custom = _bhBack === 0 && _bhFrom;
+        if (custom) { s = new Date(_bhFrom + 'T00:00:00').getTime(); e = _bhTo ? new Date(_bhTo + 'T00:00:00').getTime() + D : now; }
+        else { s = now - (_bhBack || 90) * D; e = now; }
+        if (!(e > s)) { s = now - 90 * D; e = now; custom = false; }
+        return { s, e, days: (e - s) / D, label: custom ? f(s) + ' – ' + f(e - 1) : 'last ' + Math.round((e - s) / D) + ' days' };
+    }
+    function _bhSetRange(v) {
+        _bhBack = v; localStorage.setItem('pmBhBack', v);
+        if (v === 0 && !_bhFrom) { const d = new Date(Date.now() - 90 * 86400000); _bhFrom = d.toISOString().slice(0, 10); localStorage.setItem('pmBhFrom', _bhFrom); }
+        renderBuyHelper(true);
+    }
+    function _bhSetDates() {
+        _bhFrom = document.getElementById('bh-from').value || ''; _bhTo = document.getElementById('bh-to').value || '';
+        localStorage.setItem('pmBhFrom', _bhFrom); localStorage.setItem('pmBhTo', _bhTo); renderBuyHelper(true);
+    }
     function _bhSet(k, v) {
         v = parseFloat(v); if (!(v > 0)) return;
         if (k === 'days') { _bhDays = Math.round(v); localStorage.setItem('pmBhDays', _bhDays); }
@@ -1361,14 +1381,16 @@ function computeCombinedAvgRate(metal){
     }
     function _bhSetMetal(m) { _bhMetal = m; renderBuyHelper(true); }
     function _bhCompute() {
-        const D = 86400000, now = Date.now(), H = _bhDays;
+        const D = 86400000, now = Date.now(), H = _bhDays, W = _bhWin();
+        const inWin = t => t >= W.s && t < W.e;
         const cat = {}, lastSale = {}, batchSeen = {}, loose = {};   // batch = tags dated in the last 90 days
         const yi = { Gold: { ly: 0, base: 0 }, Silver: { ly: 0, base: 0 } };
         let firstSale = now;
+        const nz = v => { v = String(v || '').trim(); if (!v) return ''; return /^\d+(\.\d+)?$/.test(v) ? String(parseFloat(v)) : v.toUpperCase(); };
         const mk = (metal, stamp, name) => {
             if (metal === 'Silver') stamp = '';   // silver stamps differ between tags and invoices (S7 / S925 / blank) — group silver by item name only
             const k = metal + '|' + (stamp || '-') + '|' + name.toUpperCase();
-            return cat[k] || (cat[k] = { metal, stamp: stamp || '', name, sold30: 0, sold90: 0, g90: 0, stock: 0, stockG: 0, lastBought: '', oldest: '', bSold: 0, bNew: 0, key: k.replace(/[.$#\[\]\/]/g, '_') });
+            return cat[k] || (cat[k] = { metal, stamp: stamp || '', name, sold30: 0, sold90: 0, g90: 0, stock: 0, stockG: 0, lastBought: '', oldest: '', bSold: 0, bNew: 0, sl: [], tl: [], key: k.replace(/[.$#\[\]\/]/g, '_') });
         };
         _pmSalesSrc().forEach(inv => {
             if (inv.draft) return;
@@ -1380,7 +1402,7 @@ function computeCombinedAvgRate(metal){
                 if (bc && (!lastSale[bc] || t > lastSale[bc])) lastSale[bc] = t;
                 if (!bc) {   // untagged (loose / typed-in) sale: no tag stock to compare against, so listed separately, never suggested
                     const lm = getInvoiceItemPureGrams(it), ln = _pmAlias(String(it.itemName || it.desc || '').trim());
-                    if (lm && ln && (now - t) / D <= 90) {
+                    if (lm && ln && inWin(t)) {
                         const l = loose[lm.metal + '|' + ln.toLowerCase()] || (loose[lm.metal + '|' + ln.toLowerCase()] = { metal: lm.metal, name: ln, pcs: 0, g: 0 });
                         l.pcs += it.pc || 1; l.g += it.nlWt || 0;
                     }
@@ -1391,9 +1413,10 @@ function computeCombinedAvgRate(metal){
                 let name = String(it.itemName || pd.itemName || it.desc || '').trim(); if (!name) return;
                 name = _pmItemName(it, name);
                 const pcs = it.pc || 1, wt = it.nlWt || 0, age = (now - t) / D;
-                if (age <= 90) {
+                if (inWin(t)) {
                     const c = mk(mw.metal, it.stamp || pd.stamp, name);
-                    c.sold90 += pcs; c.g90 += wt; if (age <= 30) c.sold30 += pcs;
+                    c.sold90 += pcs; c.g90 += wt; if (t >= W.e - 30 * D) c.sold30 += pcs;
+                    c.sl.push({ w: wt / pcs, s: nz(it.size || pd.size), d: nz(it.design || pd.design), n: pcs });   // sold piece (per-piece net weight)
                     const tdMs = it.tagDate ? new Date(it.tagDate).getTime() : 0;   // saved on the invoice line at sale time
                     if (tdMs && bc && (now - tdMs) / D <= 90) { c.bSold += pcs; batchSeen[bc] = 1; }
                 }
@@ -1403,6 +1426,9 @@ function computeCombinedAvgRate(metal){
                 else if (ago < 0 && ago >= -90) yi[mw.metal].base += wt;
             });
         });
+        // if the data starts after the window starts, only count the days the data actually covers
+        W.days = Math.max(1, (W.e - Math.max(W.s, firstSale)) / D);
+        if (firstSale > W.s) W.label += ' (data from ' + new Date(firstSale).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: '2-digit' }) + ')';
         const idx = {};
         ['Gold', 'Silver'].forEach(m => {
             const y = yi[m];
@@ -1420,13 +1446,89 @@ function computeCombinedAvgRate(metal){
             if (sold) { if (td && !batchSeen[bc] && (now - td) / D <= 90) c.bSold++; return; }   // older invoices have no tagDate: use the tag still listed
             if (td && (now - td) / D <= 90) c.bNew++;
             c.stock++; c.stockG += p.netWeight || 0;
+            c.tl.push({ w: p.netWeight || 0, s: nz(p.size), d: nz(p.design) });   // tag in stock
             if (p.tagDate) {
                 if (!c.lastBought || p.tagDate > c.lastBought) c.lastBought = p.tagDate;
                 if (!c.oldest || p.tagDate < c.oldest) c.oldest = p.tagDate;
             }
         });
-        return { cat: Object.values(cat), idx, loose: Object.values(loose) };
+        return { cat: Object.values(cat), idx, loose: Object.values(loose), W };
     }
+    function _bhRowsFor() {
+        const { cat, idx, loose, W } = _bhCompute();
+        const H = _bhDays, mult = idx[_bhMetal] * _bhBoost;
+        const rows = cat.filter(c => c.metal === _bhMetal).map(c => {
+            const rate = c.sold90 / W.days * mult;
+            const need = Math.max(0, Math.ceil(rate * H - c.stock));
+            const cover = rate > 0 ? c.stock / rate : Infinity;
+            const avgW = (c.sold90 && c.g90 > 0) ? c.g90 / c.sold90 : (c.stock ? c.stockG / c.stock : 0);
+            return Object.assign(c, { rate, need, cover, avgW });
+        });
+        return { rows, idx, loose, H, mult, W };
+    }
+    // Tap a tile -> which sizes / designs / size x design sell, against what is in stock
+    let _bhPopKey = '', _bhPopMode = 's', _bhPopStep = 0;
+    function _bhOpen(enc) { _bhPopKey = decodeURIComponent(enc); _bhPopMode = 's'; _bhPopStep = 0; _bhPopRender(); }
+    function _bhPopSet(m) { _bhPopMode = m; _bhPopRender(); }
+    function _bhPopStepSet(v) { v = parseFloat(v); _bhPopStep = v > 0 ? v : 0; _bhPopRender(); }
+    function _bhPopRender() {
+        const { rows, H, mult, W } = _bhRowsFor();
+        const r = rows.find(x => x.key === _bhPopKey); if (!r) return;
+        const E = t => String(t == null ? '' : t).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+        const col = d => d < 30 ? '#D32F2F' : d < 90 ? '#EF6C00' : '#4CAF50';
+        const covTxt = d => d === Infinity ? '—' : d > 730 ? (d / 365).toFixed(1) + ' yrs' : d > 365 ? '1+ yr' : Math.round(d) + ' d';
+        const modes = [['s', 'Size'], ['d', 'Design'], ['w', 'Weight'], ['sw', 'Size × Wt'], ['dw', 'Design × Wt'], ['sd', 'Size × Design'], ['sdw', 'Size × Design × Wt']];
+        const m = modes.find(x => x[0] === _bhPopMode) || modes[0];
+        const dims = m[0], hasW = dims.includes('w');
+        // weight buckets: auto width from this item's own weights (about 6 buckets), or the width typed in
+        let step = _bhPopStep;
+        const fmt = x => String(parseFloat(x.toFixed(2)));
+        if (hasW && !step) {
+            const ws = r.sl.concat(r.tl).map(x => x.w).filter(w => w > 0), range = ws.length ? Math.max.apply(null, ws) - Math.min.apply(null, ws) : 0;
+            step = [0.1, 0.2, 0.25, 0.5, 1, 2, 2.5, 5, 10, 20, 25, 50, 100, 200].find(n => n >= range / 6) || 200;
+        }
+        const keyOf = x => {
+            const parts = [], lo = hasW && x.w > 0 ? Math.floor(x.w / step + 1e-9) * step : 0;
+            if (dims.includes('s')) { if (!x.s) return null; parts.push('Size ' + x.s); }
+            if (dims.includes('d')) { if (!x.d) return null; parts.push(x.d); }
+            if (hasW) { if (!(x.w > 0)) return null; parts.push(fmt(lo) + '–' + fmt(lo + step) + ' g'); }
+            return { k: parts.join(' · '), lo };
+        };
+        const map = {}; let soldQ = 0, tagQ = 0;
+        r.sl.forEach(x => { const q = keyOf(x); if (q) { const e = map[q.k] = map[q.k] || { sold: 0, stock: 0, lo: q.lo }; e.sold += x.n; soldQ += x.n; } });
+        r.tl.forEach(x => { const q = keyOf(x); if (q) { const e = map[q.k] = map[q.k] || { sold: 0, stock: 0, lo: q.lo }; e.stock++; tagQ++; } });
+        const ents = Object.keys(map).map(l => {
+            const e = map[l], rate = e.sold / W.days * mult, cv = rate > 0 ? e.stock / rate : Infinity;
+            return { label: l, sold: e.sold, stock: e.stock, lo: e.lo, cv, need: 0, c: e.sold >= 2 ? col(e.stock === 0 ? 0 : cv) : '#9E9E9E' };
+        }).sort(dims === 'w' ? (a, b) => a.lo - b.lo : (a, b) => b.sold - a.sold || b.stock - a.stock);
+        // Split the ITEM's buy number across sizes/designs, so rows add up to the number on the tile.
+        // Only some sales carry a size, so scale that mix up to the item's full demand, then give each size the
+        // pieces it lacks (target - stock). If nothing lacks, fall back to its share of sales.
+        const sumSold = ents.reduce((a, e) => a + e.sold, 0), D = r.rate * H;
+        const total = r.sold90 >= 2 ? r.need : 0;
+        if (total > 0 && sumSold > 0) {
+            ents.forEach(e => { e.gap = Math.max(0, D * e.sold / sumSold - e.stock); });
+            const useGap = ents.some(e => e.gap > 0), w = e => useGap ? e.gap : e.sold, tw = ents.reduce((a, e) => a + w(e), 0);
+            ents.forEach(e => { const raw = total * w(e) / tw; e.need = Math.floor(raw); e.frac = raw - e.need; });
+            let left = total - ents.reduce((a, e) => a + e.need, 0);
+            ents.filter(e => w(e) > 0).sort((a, b) => b.frac - a.frac).forEach(e => { if (left > 0) { e.need++; left--; } });
+        }
+        const short = ents.filter(e => e.need > 0).sort((a, b) => b.need - a.need).slice(0, 4).map(e => E(e.label));
+        const tabs = modes.map(x => `<button onclick="_bhPopSet('${x[0]}')" class="bh-seg${x[0] === m[0] ? ' on' : ''}" style="font-size:11px;padding:7px 2px;">${x[1]}</button>`).join('');
+        const row = e => `<div style="display:flex;justify-content:space-between;gap:8px;align-items:center;padding:8px 0 8px 10px;border-top:1px solid var(--border);border-left:4px solid ${e.c};margin-top:2px;">
+            <div style="min-width:0;"><div style="font-weight:800;font-size:13px;">${E(e.label)}</div>
+            <div style="font-size:11px;color:var(--text2);">sold ${e.sold} · have ${e.stock}${e.sold >= 2 && e.cv !== Infinity ? ' · ' + covTxt(e.cv) + ' left' : ''}</div></div>
+            ${e.need > 0 ? `<div style="font-weight:800;color:${e.c};white-space:nowrap;">buy ${e.need}</div>` : `<div style="font-size:11px;color:var(--text2);">${e.sold >= 2 ? 'OK' : e.sold ? 'few sold' : 'slow'}</div>`}</div>`;
+        const h = `<div style="text-align:left;">
+            <div style="display:flex;gap:6px;margin-bottom:8px;font-size:12px;flex-wrap:wrap;"><b>Sold ${r.sold90}</b><span>· have ${r.stock}</span><span style="color:${col(r.cover)};font-weight:700;">· ${covTxt(r.cover)} left</span>${r.need > 0 && r.sold90 >= 2 ? `<span style="font-weight:800;color:#C62828;">· buy ${r.need}</span>` : ''}</div>
+            <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-bottom:8px;">${tabs}</div>
+            ${hasW ? `<label style="display:flex;align-items:center;gap:8px;font-size:11px;color:var(--text2);margin-bottom:6px;">Weight bucket (g)<input type="number" min="0.05" step="0.05" value="${fmt(step)}" onchange="_bhPopStepSet(this.value)" style="margin:0;width:90px;padding:5px 8px;font-size:13px;"><span>${_bhPopStep ? '' : 'auto'}</span></label>` : ''}
+            ${short.length ? `<div style="font-size:12px;margin-bottom:4px;"><b>Short on:</b> ${short.join(', ')}</div>` : ''}
+            <div style="max-height:46vh;overflow:auto;">${ents.length ? ents.slice(0, 40).map(row).join('') : '<div class="note" style="padding:10px 0;">None recorded for this item.</div>'}${ents.length > 40 ? `<div class="note" style="padding:6px 0;">+ ${ents.length - 40} more small groups</div>` : ''}</div>
+            <div style="font-size:10.5px;color:var(--text2);margin-top:6px;">${tagQ} of ${r.stock} tags in stock and ${soldQ} of ${r.sold90} sold pcs have ${m[1].replace(/ × /g, ' + ').toLowerCase()}. ${W.label}. Buy split uses those ${sumSold} sales${sumSold < 8 ? ' (small sample — treat as a hint)' : ''}; rows add up to ${total}.</div></div>`;
+        _pmSetModal(r.name + (r.stamp ? ' ' + r.stamp : ''), h, _pmPopWrap(_pmBtn('Close', 'closePmAlert()', 'ghost')));
+    }
+
     function renderBuyHelper(force) {
         const sec = document.getElementById('pm-bh-sec'); if (!sec) return;
         sec.style.display = currentInvTrack === 'B' ? '' : 'none';
@@ -1434,36 +1536,69 @@ function computeCombinedAvgRate(metal){
         const body = document.getElementById('pm-bh-body');
         if (!force && body.contains(document.activeElement) && document.activeElement.tagName === 'INPUT') return;
         const E = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-        const { cat, idx, loose } = _bhCompute();
-        const H = _bhDays, mult = idx[_bhMetal] * _bhBoost, dayMs = 86400000;
-        const rows = cat.filter(c => c.metal === _bhMetal).map(c => {
-            const rate = c.sold90 / 90 * mult;
-            const need = Math.max(0, Math.ceil(rate * H - c.stock));
-            const cover = rate > 0 ? c.stock / rate : Infinity;
-            const avgW = (c.sold90 && c.g90 > 0) ? c.g90 / c.sold90 : (c.stock ? c.stockG / c.stock : 0);
-            return Object.assign(c, { rate, need, cover, avgW });
-        });
+        const { rows, idx, loose, H, mult, W } = _bhRowsFor(), dayMs = 86400000;
         const buy = rows.filter(r => r.need > 0 && r.sold90 >= 2 && !buyHidden[r.key]).sort((a, b) => a.cover - b.cover).slice(0, 40);
+        const cov = rows.filter(r => r.sold90 >= 2).sort((a, b) => a.cover - b.cover || b.sold90 - a.sold90);
         const looseRows = loose.filter(l => l.metal === _bhMetal).sort((a, b) => b.pcs - a.pcs);
         const hiddenRows = rows.filter(r => buyHidden[r.key]);
         const dead = rows.filter(r => r.stock > 0 && r.sold90 === 0).sort((a, b) => (a.oldest || '9') < (b.oldest || '9') ? -1 : 1).slice(0, 25);
         const recent = r => r.lastBought && (Date.now() - new Date(r.lastBought).getTime()) / dayMs <= 14;
-        const nm = r => E(r.name) + (r.stamp ? ' <span style="color:var(--text2);">' + E(r.stamp) + '</span>' : '');
-        const tabBtn = m => `<button onclick="_bhSetMetal('${m}')" style="flex:1; margin:0; padding:7px; border-radius:8px; font-size:12px; font-weight:700; box-shadow:none; ${_bhMetal === m ? 'background:var(--accent,#333); color:#fff; border:1.5px solid var(--accent,#333);' : 'background:none; color:var(--text2); border:1.5px solid var(--border);'}">${m === 'Gold' ? '🟡' : '⚪'} ${m}</button>`;
-        const inp = (lbl, id, val, step, fn) => `<label style="flex:1; font-size:10.5px; color:var(--text2); font-weight:700;">${lbl}<input type="number" min="0.1" step="${step}" value="${val}" onchange="${fn}" style="margin:2px 0 0; padding:6px 8px; font-size:13px;"></label>`;
-        const line = r => `<div style="display:flex; justify-content:space-between; gap:8px; padding:8px 0; border-top:1px solid var(--border); font-size:12px;">
-                <div style="min-width:0;"><div style="font-weight:700;">${nm(r)}</div>
-                <div style="color:var(--text2); font-size:10.5px;">sold ${r.sold90} in 90d (${r.sold30} in 30d) · stock ${r.stock}${r.cover === Infinity ? '' : ' · ' + Math.round(r.cover) + 'd cover'}${r.bSold + r.bNew ? ' · new in 90d: ' + r.bSold + ' of ' + (r.bSold + r.bNew) + ' sold' : ''}${r.lastBought ? ' · last bought ' + E(r.lastBought) : ''}${recent(r) ? ' <b style="color:#E65100;">· restocked recently</b>' : ''}</div></div>
-                <div style="display:flex; align-items:flex-start; gap:8px;"><div style="text-align:right; white-space:nowrap;"><div style="font-weight:800; color:#C62828;"><span style="color:var(--text2); font-weight:600;">have ${r.stock}</span> · buy ${r.need} pcs</div><div style="color:var(--text2); font-size:10.5px;">${r.avgW > 0 ? '≈ ' + (r.need * r.avgW).toFixed(1) + 'g' : ''}</div></div><button onclick="_bhHide('${encodeURIComponent(r.key).replace(/'/g, '%27')}', true)" title="Hide this suggestion" style="margin:0; width:24px; height:24px; padding:0; border-radius:50%; border:1px solid var(--border); background:none; color:var(--text2); font-size:12px; line-height:1; box-shadow:none;">✕</button></div></div>`;
+        const covTxt = d => d === Infinity ? '—' : d > 730 ? (d / 365).toFixed(1) + ' yrs' : d > 365 ? '1+ yr' : Math.round(d) + ' d';
+        const col = d => d < 30 ? '#D32F2F' : d < 90 ? '#EF6C00' : '#4CAF50';
+        const key = r => encodeURIComponent(r.key).replace(/'/g, '%27');
+        const stamp = r => r.stamp ? ` <span class="bh-st">${E(r.stamp)}</span>` : '';
+        const tip = r => E(`Sold ${r.sold90} in ${W.label} (${r.sold30} in last 30d)` + (r.bSold + r.bNew ? ` · new in 90d: ${r.bSold} of ${r.bSold + r.bNew} sold` : '') + (r.lastBought ? ` · last bought ${r.lastBought}` : ''));
+        const buyTile = r => `<div class="bh-tile" style="--c:${col(r.cover)};cursor:pointer;" title="${tip(r)}" onclick="_bhOpen('${key(r)}')">
+            <button class="bh-x" onclick="event.stopPropagation();_bhHide('${key(r)}', true)" title="Hide">✕</button>
+            <div class="bh-name">${E(r.name)}${stamp(r)}</div>
+            <div class="bh-big" style="color:${col(r.cover)}">Buy ${r.need}</div>
+            <div class="bh-sub">${r.avgW > 0 ? '≈ ' + (r.need * r.avgW).toFixed(0) + ' g · ' : ''}have ${r.stock} · ${covTxt(r.cover)} left</div>
+            ${recent(r) ? '<div class="bh-chip">restocked</div>' : ''}</div>`;
+        const covTile = r => `<div class="bh-tile" style="--c:${col(r.cover)};cursor:pointer;" title="${tip(r)}" onclick="_bhOpen('${key(r)}')">
+            <div class="bh-name">${E(r.name)}${stamp(r)}</div>
+            <div class="bh-big" style="color:${col(r.cover)}">${covTxt(r.cover)}</div>
+            <div class="bh-bar"><i style="width:${Math.max(4, Math.min(100, (r.cover === Infinity ? 180 : r.cover) / 180 * 100))}%"></i></div>
+            <div class="bh-sub">${r.stock} left · ${r.rate.toFixed(2)}/day</div></div>`;
+        const mini = (l, r) => `<div class="bh-mini"><span>${l}</span><span>${r}</span></div>`;
+        const seg = m => `<button onclick="_bhSetMetal('${m}')" class="bh-seg${_bhMetal === m ? ' on' : ''}">${m === 'Gold' ? '🟡' : '⚪'} ${m}</button>`;
+        const num = (lbl, val, step, fn) => `<label class="bh-num">${lbl}<input type="number" min="0.1" step="${step}" value="${val}" onchange="${fn}"></label>`;
         body.innerHTML = `
-            <div style="display:flex; gap:8px; margin-bottom:8px;">${tabBtn('Gold')}${tabBtn('Silver')}</div>
-            <div style="display:flex; gap:8px; margin-bottom:6px;">${inp('Cover days', 'bh-days', H, 1, "_bhSet('days', this.value)")}${inp('Season boost ×', 'bh-boost', _bhBoost, 0.05, "_bhSet('boost', this.value)")}</div>
-            <div style="font-size:10.5px; color:var(--text2); margin-bottom:6px;">Demand = last 90 days × ${mult.toFixed(2)}${idx[_bhMetal] !== 1 ? ' (incl. ×' + idx[_bhMetal].toFixed(2) + ' from last year’s same period)' : ''}. Both tracks’ sales counted; suggestions cover tagged items only.</div>
-            <div style="font-size:12px; font-weight:800; margin:8px 0 0;">To buy (${buy.length})</div>
-            ${buy.length ? buy.map(line).join('') : '<p class="note" style="margin:6px 0;">Nothing short at ' + H + ' days of cover.</p>'}
-            ${hiddenRows.length ? `<details class="pm-more-info" style="margin-top:10px;"><summary>Hidden suggestions (${hiddenRows.length})</summary>${hiddenRows.map(r => `<div style="display:flex; justify-content:space-between; align-items:center; padding:6px 0; border-top:1px solid var(--border); font-size:12px;"><span>${nm(r)}</span><button onclick="_bhHide('${encodeURIComponent(r.key).replace(/'/g, '%27')}', false)" style="margin:0; width:auto; padding:4px 10px; font-size:11px; box-shadow:none;">Restore</button></div>`).join('')}</details>` : ''}
-            ${looseRows.length ? `<details class="pm-more-info" style="margin-top:10px;"><summary>Sold without a tag — loose / typed-in (${looseRows.length})</summary><div style="font-size:10.5px; color:var(--text2); padding:4px 0;">No tag stock to compare, so no buy suggestion. Last 90 days.</div>${looseRows.map(l => `<div style="display:flex; justify-content:space-between; padding:6px 0; border-top:1px solid var(--border); font-size:12px;"><span>${E(l.name)}</span><span style="color:var(--text2); white-space:nowrap;">${l.pcs} pcs · ${l.g.toFixed(2)}g</span></div>`).join('')}</details>` : ''}
-            ${dead.length ? `<details class="pm-more-info" style="margin-top:10px;"><summary>Don’t buy — stock with no sales in 90 days (${dead.length})</summary>${dead.map(r => `<div style="display:flex; justify-content:space-between; padding:6px 0; border-top:1px solid var(--border); font-size:12px;"><span>${nm(r)}</span><span style="color:var(--text2); white-space:nowrap;">${r.stock} pcs${r.oldest ? ' · since ' + E(r.oldest) : ''}</span></div>`).join('')}</details>` : ''}`;
+            <style>
+                .bh-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(148px,1fr));gap:8px;}
+                .bh-tile{position:relative;border:1px solid var(--border);border-radius:12px;padding:10px 10px 9px 14px;background:var(--surface);overflow:hidden;}
+                .bh-tile::before{content:'';position:absolute;left:0;top:0;bottom:0;width:5px;background:var(--c);}
+                .bh-name{font-size:12.5px;font-weight:800;line-height:1.2;padding-right:20px;word-break:break-word;}
+                .bh-st{font-size:10px;font-weight:600;color:var(--text2);}
+                .bh-big{font-size:23px;font-weight:800;line-height:1.1;margin-top:6px;}
+                .bh-sub{font-size:10.5px;color:var(--text2);margin-top:3px;}
+                .bh-bar{height:5px;border-radius:3px;background:rgba(128,128,128,.18);margin-top:7px;overflow:hidden;}
+                .bh-bar i{display:block;height:100%;background:var(--c);border-radius:3px;}
+                .bh-chip{display:inline-block;margin-top:5px;font-size:9.5px;font-weight:700;color:#EF6C00;border:1px solid #EF6C00;border-radius:8px;padding:0 6px;}
+                .bh-x{position:absolute;top:5px;right:5px;width:22px;height:22px;margin:0;padding:0;border-radius:50%;border:none;background:rgba(128,128,128,.14);color:var(--text2);font-size:11px;line-height:1;box-shadow:none;}
+                .bh-h{display:flex;align-items:center;gap:6px;font-size:12.5px;font-weight:800;margin:14px 0 7px;}
+                .bh-h b{font-size:10.5px;font-weight:700;background:rgba(128,128,128,.16);border-radius:9px;padding:1px 8px;}
+                .bh-seg{flex:1;margin:0;padding:9px;border-radius:10px;font-size:13px;font-weight:700;box-shadow:none;background:none;color:var(--text2);border:1.5px solid var(--border);}
+                .bh-seg.on{background:var(--charcoal);color:#fff;border-color:var(--charcoal);}
+                .bh-num{flex:1;font-size:10.5px;font-weight:700;color:var(--text2);}
+                .bh-num input{margin:2px 0 0;padding:7px 9px;font-size:14px;}
+                .bh-ok{border:1px dashed var(--border);border-radius:12px;padding:12px;text-align:center;font-size:12.5px;color:var(--text2);}
+                .bh-mini{display:flex;justify-content:space-between;gap:8px;padding:6px 0;border-top:1px solid var(--border);font-size:12px;}
+                .bh-mini span:last-child{color:var(--text2);white-space:nowrap;font-size:11px;}
+            </style>
+            <div style="display:flex;gap:8px;margin-bottom:8px;">${seg('Gold')}${seg('Silver')}</div>
+            <div style="display:flex;gap:8px;">${num('Cover days', H, 1, "_bhSet('days', this.value)")}${num('Season boost ×', _bhBoost, 0.05, "_bhSet('boost', this.value)")}</div>
+            <div style="display:flex;gap:6px;margin-top:8px;">${[[30, '30 d'], [90, '90 d'], [180, '6 m'], [365, '1 y'], [0, 'Custom']].map(x => `<button class="bh-seg${_bhBack === x[0] ? ' on' : ''}" style="font-size:12px;padding:7px 2px;" onclick="_bhSetRange(${x[0]})">${x[1]}</button>`).join('')}</div>
+            ${_bhBack === 0 ? `<div style="display:flex;gap:8px;margin-top:6px;"><label class="bh-num">From<input type="date" id="bh-from" value="${E(_bhFrom)}" onchange="_bhSetDates()"></label><label class="bh-num">To (blank = today)<input type="date" id="bh-to" value="${E(_bhTo)}" onchange="_bhSetDates()"></label></div>` : ''}
+            <div class="bh-sub" style="margin-top:5px;">Learning from sales: ${W.label}</div>
+            <details class="pm-more-info" style="margin-top:6px;"><summary>How it works</summary><div class="note" style="padding:4px 0;">Buy = sales in the chosen range (${W.label}) × ${mult.toFixed(2)}${idx[_bhMetal] !== 1 ? ' (incl. last year’s same-period uplift)' : ''} × cover days − stock. Both tracks’ sales, tagged items only. Needs 2+ sales. Tap a tile for sizes &amp; designs; ✕ hides a suggestion.</div></details>
+            <div class="bh-h">To buy <b>${buy.length}</b></div>
+            ${buy.length ? `<div class="bh-grid">${buy.map(buyTile).join('')}</div>` : `<div class="bh-ok">✅ Nothing short at ${H} days of cover</div>`}
+            <div class="bh-h">Running low first <b>top ${Math.min(10, cov.length)}</b></div>
+            ${cov.length ? `<div class="bh-grid">${cov.slice(0, 10).map(covTile).join('')}</div>` : '<div class="bh-ok">Not enough sales yet</div>'}
+            ${cov.length > 10 ? `<details class="pm-more-info" style="margin-top:8px;"><summary>More items (${cov.length - 10})</summary><div class="bh-grid" style="margin-top:6px;">${cov.slice(10).map(covTile).join('')}</div></details>` : ''}
+            ${hiddenRows.length ? `<details class="pm-more-info" style="margin-top:10px;"><summary>Hidden (${hiddenRows.length})</summary>${hiddenRows.map(r => `<div class="bh-mini"><span>${E(r.name)}${stamp(r)}</span><button onclick="_bhHide('${key(r)}', false)" style="margin:0;width:auto;padding:3px 10px;font-size:11px;box-shadow:none;">Restore</button></div>`).join('')}</details>` : ''}
+            ${looseRows.length ? `<details class="pm-more-info" style="margin-top:10px;"><summary>Sold without a tag (${looseRows.length})</summary>${looseRows.map(l => mini(E(l.name), l.pcs + ' pcs · ' + l.g.toFixed(1) + ' g')).join('')}</details>` : ''}
+            ${dead.length ? `<details class="pm-more-info" style="margin-top:10px;"><summary>No sales in range (${dead.length})</summary>${dead.map(r => mini(E(r.name) + stamp(r), r.stock + ' pcs' + (r.oldest ? ' · since ' + E(r.oldest.slice(0, 7)) : ''))).join('')}</details>` : ''}`;
     }
 
     function renderPurchaseTab(){
@@ -4627,21 +4762,37 @@ function computeCombinedAvgRate(metal){
     // Hand-made merge list. Every report and the Purchase helper count the "from" name under the "to" name.
     function pmAliasOpen() {
         if (_pmAvBlocked()) return;
-        const names = new Set();
-        Object.values(productData).forEach(p => { if (p && p.itemName) names.add(String(p.itemName).trim()); });
-        _pmSalesSrc().forEach(inv => (inv.items || []).forEach(i => { if (i && !i.isCustom) { const n = String(i.itemName || i.desc || '').trim(); if (n) names.add(n); } }));
-        const dl = Array.from(names).sort((a, b) => a.localeCompare(b)).map(n => '<option value="' + _rpEsc(n) + '">').join('');
+        // every name seen, with how many tags are in stock under it and how many times it was sold (for the tap list)
+        const nm = {};
+        const note = (n, k) => { n = String(n || '').trim(); if (!n) return; (nm[n] = nm[n] || { n, stock: 0, sold: 0 })[k]++; };
+        Object.values(productData).forEach(p => { if (p) note(p.itemName, 'stock'); });
+        _pmSalesSrc().forEach(inv => { if (!inv.draft) (inv.items || []).forEach(i => { if (i && !i.isCustom) note(i.itemName || i.desc, 'sold'); }); });
+        window._pmAlNames = Object.values(nm).map((x, i) => Object.assign(x, { i }));
         const inp = 'margin:0; width:100%; padding:9px 10px; border:1.5px solid var(--border); border-radius:8px; font-size:14px; box-sizing:border-box;';
         const rows = Object.keys(itemAliases).map(k => itemAliases[k]).filter(a => a && a.from && a.to).sort((a, b) => a.from.localeCompare(b.from));
         let h = '<div style="text-align:left; font-size:13px;"><p class="note" style="margin:0 0 8px;">Pick two names that are really the same item. Sales and the Purchase helper then count the first name under the second. Past sales are included. Nothing on invoices changes.</p>' +
-            '<datalist id="pm-al-names">' + dl + '</datalist>' +
-            '<label style="font-size:11px; font-weight:700; color:var(--text2);">This name</label><input id="pm-al-from" list="pm-al-names" placeholder="e.g. Gold Ring" autocomplete="off" style="' + inp + '">' +
-            '<label style="font-size:11px; font-weight:700; color:var(--text2); display:block; margin-top:8px;">counts as</label><input id="pm-al-to" list="pm-al-names" placeholder="e.g. G RING" autocomplete="off" style="' + inp + '">' +
+            '<label style="font-size:11px; font-weight:700; color:var(--text2);">This name (tap to pick, or type to search)</label><input id="pm-al-from" placeholder="e.g. Gold Ring" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" oninput="pmAlSuggest(\'from\')" onfocus="pmAlSuggest(\'from\')" style="' + inp + '"><div id="pm-al-sug-from"></div>' +
+            '<label style="font-size:11px; font-weight:700; color:var(--text2); display:block; margin-top:8px;">counts as (stock item names)</label><input id="pm-al-to" placeholder="e.g. G RING" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" oninput="pmAlSuggest(\'to\')" onfocus="pmAlSuggest(\'to\')" style="' + inp + '"><div id="pm-al-sug-to"></div>' +
             '<div id="pm-al-msg" class="note" style="min-height:14px; margin-top:6px; color:#C62828;"></div>' +
             '<div style="max-height:30vh; overflow:auto; margin-top:6px;">' +
             (rows.length ? rows.map(a => '<div style="display:flex; align-items:center; gap:8px; padding:6px 0; border-top:1px solid #eee;"><span style="flex:1;">' + _rpEsc(a.from) + ' → <b>' + _rpEsc(a.to) + '</b></span><button onclick="pmAliasDel(\'' + encodeURIComponent(_alKey(a.from)).replace(/'/g, '%27') + '\')" style="margin:0; width:auto; padding:4px 10px; font-size:11px; box-shadow:none;">Remove</button></div>').join('') : '<div class="note">No merges yet.</div>') +
             '</div></div>';
         _pmSetModal('Treat names as one', h, _pmPopWrap(_pmBtn('Add', 'pmAliasAdd()') + _pmBtn('Close', 'closePmAlert()', 'ghost')));
+    }
+    function pmAlSuggest(which) {
+        const el = document.getElementById('pm-al-' + which), box = document.getElementById('pm-al-sug-' + which); if (!el || !box) return;
+        const q = el.value.trim().toUpperCase();
+        let list = (window._pmAlNames || []).slice();
+        if (which === 'to') list = list.filter(x => x.stock > 0).sort((a, b) => b.stock - a.stock);
+        else list.sort((a, b) => ((a.stock > 0) - (b.stock > 0)) || (b.sold - a.sold));   // names with no stock tags (likely print labels) first
+        list = list.filter(x => (!q || x.n.toUpperCase().includes(q)) && x.n.toUpperCase() !== q).slice(0, 6);
+        box.innerHTML = list.map(x => '<div onclick="pmAlPick(\'' + which + '\',' + x.i + ')" style="display:flex; justify-content:space-between; gap:8px; padding:9px 10px; margin-top:4px; background:#F4F7F4; border-radius:8px; font-size:13px; cursor:pointer;"><b>' + _rpEsc(x.n) + '</b><span style="color:var(--text2); font-size:11px; white-space:nowrap;">' + (x.stock ? x.stock + ' in stock' : 'sold only') + (x.sold ? ' · sold ' + x.sold : '') + '</span></div>').join('');
+    }
+    function pmAlPick(which, i) {
+        const x = (window._pmAlNames || [])[i]; if (!x) return;
+        document.getElementById('pm-al-' + which).value = x.n;
+        document.getElementById('pm-al-sug-' + which).innerHTML = '';
+        if (which === 'from') { const t = document.getElementById('pm-al-to'); if (t) { t.focus(); pmAlSuggest('to'); } }
     }
     async function pmAliasAdd() {
         const msg = t => { const el = document.getElementById('pm-al-msg'); if (el) el.textContent = t; };
