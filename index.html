@@ -2210,7 +2210,7 @@ function computeCombinedAvgRate(metal){
             g('payment-balance-note').textContent = `${_pmRs(getPartyAmountBalance(partyId, currentInvTrack))} outstanding for ${getPartyName(partyId)} (amount credit).`;
         } else {
             const metal = g('payment-metal').value;
-            g('payment-balance-note').textContent = `${getPartyCreditBalance(partyId, currentInvTrack, metal).toFixed(2)}g outstanding for ${getPartyName(partyId)} (${metal}).`;
+            g('payment-balance-note').textContent = `${getPartyCreditBalance(partyId, currentInvTrack, metal).toFixed(3)}g outstanding for ${getPartyName(partyId)} (${metal}).`;
         }
     }
     // Changing party: if the chosen type has nothing outstanding but the other does, switch to it.
@@ -2730,7 +2730,7 @@ function computeCombinedAvgRate(metal){
                 if (s.round > 0) lines.push('Round-off / extra: ' + _rpFmt(s.round));
                 const due = [];
                 if (s.pid) {
-                    ['Gold', 'Silver'].forEach(m => { const b = getPartyCreditBalance(s.pid, 'B', m); if (b > 0.005) due.push(b.toFixed(2) + 'g ' + m); });
+                    ['Gold', 'Silver'].forEach(m => { const b = getPartyCreditBalance(s.pid, 'B', m); if (b > 0.0005) due.push(b.toFixed(3) + 'g ' + m); });
                     const pb = pieceSupplies.filter(r => r.partyId === s.pid && r.track === 'B').reduce((a, r) => a + (r.kind === 'payment' ? -(r.amount || 0) : (r.amount || 0)), 0);
                     if (pb > 0.5) due.push(_rpFmt(pb));
                 }
@@ -4950,17 +4950,17 @@ function computeCombinedAvgRate(metal){
         d.pur.forEach(p => {
             let txt;
             if (p.creditType === 'amount') txt = `Purchase · ${_pmRs(p.amount)} <span style="color:#FB8C00;">on credit</span>`;
-            else if (_pmFixed(p)) txt = `Purchase · ${p.metal} ${(p.weight || 0).toFixed(2)}g @ ${_pmRs(p.rate)}/g <span style="color:#FB8C00;">on credit (owes ${_pmRs(_pmFixedOwed(p))}${p.extra ? ', incl. ' + _pmRs(p.extra) + ' extra' : ''})</span>`;
-            else if (p.status === 'paid') txt = `Purchase · ${p.metal} ${(p.weight || 0).toFixed(2)}g @ ${_pmRs(p.rate)}/g${p.planId ? ' <span style="color:var(--text2);">(plan)</span>' : ''}`;
-            else txt = `Purchase · ${p.metal} ${(p.weight || 0).toFixed(2)}g <span style="color:#FB8C00;">on credit</span>`;
-            if (p.source === 'adjust') txt = p.creditType === 'amount' ? `Balance adjustment · owes ${_pmRs(p.amount)} more` : `Balance adjustment · owes ${(p.weight || 0).toFixed(2)}g ${p.metal} more`;
+            else if (_pmFixed(p)) txt = `Purchase · ${p.metal} ${(p.weight || 0).toFixed(3)}g @ ${_pmRs(p.rate)}/g <span style="color:#FB8C00;">on credit (owes ${_pmRs(_pmFixedOwed(p))}${p.extra ? ', incl. ' + _pmRs(p.extra) + ' extra' : ''})</span>`;
+            else if (p.status === 'paid') txt = `Purchase · ${p.metal} ${(p.weight || 0).toFixed(3)}g @ ${_pmRs(p.rate)}/g${p.planId ? ' <span style="color:var(--text2);">(plan)</span>' : ''}`;
+            else txt = `Purchase · ${p.metal} ${(p.weight || 0).toFixed(3)}g <span style="color:#FB8C00;">on credit</span>`;
+            if (p.source === 'adjust') txt = p.creditType === 'amount' ? `Balance adjustment · owes ${_pmRs(p.amount)} more` : `Balance adjustment · owes ${(p.weight || 0).toFixed(3)}g ${p.metal} more`;
             items.push({ t: p.createdAt, date: p.date, color: '#1C1C1E', txt, note: p.note, kind: 'pur', adj: p.source === 'adjust', id: p.id, pos: p.source === 'pos-oj' || p.source === 'pos' || p.source === 'pos-adhoc' });
         });
         d.pay.forEach(x => {
             let txt = x.payType === 'amount'
                 ? `Payment · ${_pmRs(x.amount)}`
-                : `Payment · ${x.metal} ${(x.weight || 0).toFixed(2)}g ${x.rate ? '@ ' + _pmRs(x.rate) + '/g' : '(in metal)'}`;
-            if (x.source === 'adjust') txt = x.payType === 'amount' ? `Balance adjustment · owes ${_pmRs(x.amount)} less` : `Balance adjustment · owes ${(x.weight || 0).toFixed(2)}g ${x.metal} less`;
+                : `Payment · ${x.metal} ${(x.weight || 0).toFixed(3)}g ${x.rate ? '@ ' + _pmRs(x.rate) + '/g' : '(in metal)'}`;
+            if (x.source === 'adjust') txt = x.payType === 'amount' ? `Balance adjustment · owes ${_pmRs(x.amount)} less` : `Balance adjustment · owes ${(x.weight || 0).toFixed(3)}g ${x.metal} less`;
             items.push({ t: x.createdAt, date: x.date, color: '#2E7D32', txt, note: x.note, kind: 'pay', adj: x.source === 'adjust', id: x.id, pos: x.source === 'pos' });
         });
         d.piece.forEach(r => {
@@ -4986,8 +4986,8 @@ function computeCombinedAvgRate(metal){
         rows.forEach(({ p, d }) => {
             const open = !!_pmSupExp[p.id];
             const chips = [];
-            if (d.metals.Gold.owed > 0.001) chips.push(`Gold ${d.metals.Gold.owed.toFixed(2)}g`);
-            if (d.metals.Silver.owed > 0.001) chips.push(`Silver ${d.metals.Silver.owed.toFixed(2)}g`);
+            if (d.metals.Gold.owed > 0.001) chips.push(`Gold ${d.metals.Gold.owed.toFixed(3)}g`);
+            if (d.metals.Silver.owed > 0.001) chips.push(`Silver ${d.metals.Silver.owed.toFixed(3)}g`);
             if (d.amt.owed > 0.001) chips.push(_pmRs(d.amt.owed));
             if (d.pc.due > 0.5) chips.push(`Pieces ${_pmRs(d.pc.due)}`);
             const status = chips.length
@@ -5004,8 +5004,8 @@ function computeCombinedAvgRate(metal){
                 html += `<div style="${_hdCss} margin-top:12px;">Owed now</div>
                     <div style="display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; margin-bottom:12px;">`;
                 const owedBox = (label, val, bad) => `<div style="background:#F7F7F5; border-radius:10px; padding:9px 11px;"><div style="${lbl}">${label}</div><div style="font-size:15px; font-weight:800; color:${bad ? '#C62828' : '#2E7D32'};">${val}</div></div>`;
-                html += owedBox('Gold', d.metals.Gold.owed.toFixed(2) + ' g', d.metals.Gold.owed > 0.001);
-                html += owedBox('Silver', d.metals.Silver.owed.toFixed(2) + ' g', d.metals.Silver.owed > 0.001);
+                html += owedBox('Gold', d.metals.Gold.owed.toFixed(3) + ' g', d.metals.Gold.owed > 0.001);
+                html += owedBox('Silver', d.metals.Silver.owed.toFixed(3) + ' g', d.metals.Silver.owed > 0.001);
                 html += owedBox('Amount credit', _pmRs(d.amt.owed), d.amt.owed > 0.001);
                 html += owedBox('Per-piece bills', _pmRs(Math.max(0, d.pc.due)), d.pc.due > 0.5);
                 html += '</div>';
@@ -5013,7 +5013,7 @@ function computeCombinedAvgRate(metal){
                 html += `<div style="${_hdCss}">Breakdown</div><div style="font-size:12.5px; line-height:1.7; margin-bottom:12px;">`;
                 ['Gold', 'Silver'].forEach(m => {
                     const x = d.metals[m]; if (!x.has) return;
-                    html += `<div><b>${m}</b> — bought & paid ${x.paidG.toFixed(2)}g${x.avgPaidRate ? ' (avg ' + _pmRs(x.avgPaidRate) + '/g)' : ''} · on credit ${x.creditG.toFixed(2)}g${x.fixedG > 0 ? ` · fixed-rate ${x.fixedG.toFixed(2)}g @ ${_pmRs(x.avgFixedRate)}/g (owed in ₹)` : ''} · settled ${x.payG.toFixed(2)}g${x.avgPayRate ? ' (avg ' + _pmRs(x.avgPayRate) + '/g)' : ''} · <b>owed ${x.owed.toFixed(2)}g</b></div>`;
+                    html += `<div><b>${m}</b> — bought & paid ${x.paidG.toFixed(3)}g${x.avgPaidRate ? ' (avg ' + _pmRs(x.avgPaidRate) + '/g)' : ''} · on credit ${x.creditG.toFixed(3)}g${x.fixedG > 0 ? ` · fixed-rate ${x.fixedG.toFixed(3)}g @ ${_pmRs(x.avgFixedRate)}/g (owed in ₹)` : ''} · settled ${x.payG.toFixed(3)}g${x.avgPayRate ? ' (avg ' + _pmRs(x.avgPayRate) + '/g)' : ''} · <b>owed ${x.owed.toFixed(3)}g</b></div>`;
                 });
                 if (d.amt.credit || d.amt.paid) html += `<div><b>Amount credit</b> — credit ${_pmRs(d.amt.credit)} · paid ${_pmRs(d.amt.paid)} · <b>owed ${_pmRs(d.amt.owed)}</b></div>`;
                 if (d.pc.billed || d.pc.paid) html += `<div><b>Per-piece</b> — billed ${_pmRs(d.pc.billed)} · paid ${_pmRs(d.pc.paid)} · <b>due ${_pmRs(Math.max(0, d.pc.due))}</b></div>`;
