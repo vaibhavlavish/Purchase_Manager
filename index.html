@@ -261,6 +261,7 @@
         <div id="pm-tab-sales" onclick="pmSwitchTab('sales')" style="flex:1; display:flex; align-items:center; justify-content:center; padding:13px 4px; font-size:13px; font-weight:700; border-right:1px solid var(--border); background:transparent; cursor:pointer; color:var(--text2); text-align:center; user-select:none;">📈 Sales</div>
         <div id="pm-tab-purchase" onclick="pmSwitchTab('purchase')" style="flex:1; display:flex; align-items:center; justify-content:center; padding:13px 4px; font-size:13px; font-weight:700; background:transparent; cursor:pointer; color:var(--text2); text-align:center; user-select:none;">🛒 Purchase</div>
         <div id="pm-tab-report" onclick="pmSwitchTab('report')" style="display:none; flex:1; align-items:center; justify-content:center; padding:13px 4px; font-size:13px; font-weight:700; border-left:1px solid var(--border); background:transparent; cursor:pointer; color:var(--text2); text-align:center; user-select:none;">📊 Report</div>
+        <div id="pm-tab-pl" onclick="pmSwitchTab('pl')" style="display:none; flex:1; align-items:center; justify-content:center; padding:13px 4px; font-size:13px; font-weight:700; border-left:1px solid var(--border); background:transparent; cursor:pointer; color:var(--text2); text-align:center; user-select:none;">💹 P&amp;L</div>
     </div>
 
     <input type="file" id="pm-av-file" multiple accept=".json,application/json" style="display:none;" onchange="pmAvFilesChosen(this)">
@@ -348,6 +349,24 @@
                 </div>
             </div>
             <div id="rp-body"></div>
+        </div>
+
+        <div id="pm-pane-pl" style="display:none;">
+            <div style="background:var(--surface); border-radius:var(--radius); padding:14px; box-shadow:0 1px 6px rgba(0,0,0,.06); margin-bottom:12px;">
+                <div style="font-size:10px; font-weight:700; letter-spacing:.08em; color:var(--text2); text-transform:uppercase; margin-bottom:10px;">Profit &amp; Loss period</div>
+                <div style="display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; margin-bottom:10px;">
+                    <div><label style="font-size:11px; display:block; margin-bottom:3px;">From</label><input type="date" id="pl-from" onchange="plSetDates()" style="margin:0;"></div>
+                    <div><label style="font-size:11px; display:block; margin-bottom:3px;">To</label><input type="date" id="pl-to" onchange="plSetDates()" style="margin:0;"></div>
+                </div>
+                <div style="display:flex; gap:6px; flex-wrap:wrap;">
+                    <button onclick="plQuick('today')" style="flex:1; padding:7px; font-size:12px; font-weight:700; border:1.5px solid var(--border); border-radius:8px; background:white; color:var(--text);">Today</button>
+                    <button onclick="plQuick('7')" style="flex:1; padding:7px; font-size:12px; font-weight:700; border:1.5px solid var(--border); border-radius:8px; background:white; color:var(--text);">7 days</button>
+                    <button onclick="plQuick('month')" style="flex:1; padding:7px; font-size:12px; font-weight:700; border:1.5px solid var(--border); border-radius:8px; background:white; color:var(--text);">This month</button>
+                    <button onclick="plQuick('last')" style="flex:1; padding:7px; font-size:12px; font-weight:700; border:1.5px solid var(--border); border-radius:8px; background:white; color:var(--text);">Last month</button>
+                    <button onclick="plQuick('all')" style="flex:1; padding:7px; font-size:12px; font-weight:700; border:1.5px solid var(--border); border-radius:8px; background:white; color:var(--text);">All time</button>
+                </div>
+            </div>
+            <div id="pl-body"></div>
         </div>
 
         <div id="pm-pane-purchase" style="display:none;">
@@ -667,6 +686,7 @@
         if (window._pmSupOn) pmSupRender();
         if (_pmActiveTab === 'sales') renderSalesReport();
         else if (_pmActiveTab === 'report') renderReportTab();
+        else if (_pmActiveTab === 'pl') renderPlTab();
         else renderPurchaseTab();
     }
     // Firebase listeners can fire several times in a burst. Redraw at most once per 500 ms:
@@ -682,10 +702,12 @@
     function _pmApplyTrackUi(){
         const rt = document.getElementById('pm-tab-report');
         if (rt) rt.style.display = currentInvTrack === 'B' ? 'flex' : 'none';   // Report: Track B only
+        const plt = document.getElementById('pm-tab-pl');
+        if (plt) plt.style.display = currentInvTrack === 'B' ? 'flex' : 'none';   // P&L: Track B only
         const mb = document.getElementById('pm-more-btn');
         if (mb) mb.style.display = currentInvTrack === 'B' ? 'flex' : 'none';   // More menu: Track B only
         if (currentInvTrack !== 'B') pmMoreClose();
-        if (currentInvTrack !== 'B' && _pmActiveTab === 'report') pmSwitchTab('purchase');
+        if (currentInvTrack !== 'B' && (_pmActiveTab === 'report' || _pmActiveTab === 'pl')) pmSwitchTab('purchase');
     }
     function pmHandleBrandTap() {
         if (currentInvTrack === 'B') {
@@ -754,6 +776,13 @@
             productData = snap.val() || {};
             _pmRerenderSoon();
         }, err => console.error('[Products] read error', err));
+
+        // Tag Generator tags (read-only): the purchase side (tunch, purchase making, labour, supplier) used by the P&L tab
+        window.dbOnValue(window.dbRef(window.firebaseDB, 'tagsoft/tags'), snap => {
+            tgTags = snap.val() || {};
+            _pmLoaded.tgTags = true;
+            _pmRerenderSoon();
+        }, err => console.error('[TagsoftTags] read error', err));
 
         // The Purchase Manager keeps its OWN copy of invoices (pmSales), written by
         // the POS at save time — so clearing invoices in the POS never affects it.
@@ -2977,6 +3006,224 @@ function computeCombinedAvgRate(metal){
         } catch (e) { console.error('[PM] sales import failed', e); _pmSalesImportChecked = false; }
     }
 
+    // ═══════════════════════════════════════════════════════════
+    // P&L (Track B only) — tag-wise profit, valued at the PURE RATE THE ITEM WAS SOLD AT
+    //   Revenue  = item taxable value (metal + making), discount spread across the bill's items, GST excluded
+    //   Cost     = the tag's purchase side from the Tag Generator (tagsoft/tags):
+    //              fine weight (net wt x (tunch + P/wstg) / 100) x pure rate saved on that invoice item
+    //              + rupee purchase making (P/%, P/wt, P/Rs) + labour (Labour/g or /pc)
+    //              PRATE /g and PRATE /pc are all-in rupee costs, taken as they are.
+    //   Net      = gross profit (tags with a known cost) - expenses from the cash book
+    // Read-only: nothing here writes to Firebase.
+    // ═══════════════════════════════════════════════════════════
+    let tgTags = {};
+    const _plRange = { from: '', to: '' };
+    let _plView = 'sum', _plSort = 'date', _plSearch = '';
+    const _plOpen = {};
+    function _plNum(v){ const x = parseFloat(v); return isNaN(x) ? 0 : x; }
+    function _plKey(s){ return String(s == null ? '' : s).trim().toUpperCase(); }
+    // Which cash-book expense categories count as running costs. Money moved to the bank, drawings, loans, personal use
+    // are NOT costs of the business, so they are off by default; any category can be switched either way (saved on this device).
+    const _PL_NOT_COST = /bank|transfer|deposit|withdraw|drawing|personal|loan|owner|home|self|atm/i;
+    function _plExpMap(){ try { return JSON.parse(localStorage.getItem('pm_pl_exp_set') || '{}') || {}; } catch (e) { return {}; } }
+    function _plExpOn(g){ const m = _plExpMap(); return (g in m) ? !!m[g] : !_PL_NOT_COST.test(g); }
+
+    function plInitDates(){
+        if (_plRange.from) return;
+        const now = new Date();
+        _plRange.from = _rpDate(new Date(now.getFullYear(), now.getMonth(), 1));
+        _plRange.to = _rpDate(now);
+        const f = document.getElementById('pl-from'), t = document.getElementById('pl-to');
+        if (f) f.value = _plRange.from; if (t) t.value = _plRange.to;
+    }
+    function plSetDates(){
+        _plRange.from = document.getElementById('pl-from').value;
+        _plRange.to = document.getElementById('pl-to').value;
+        renderPlTab();
+    }
+    function plQuick(k){
+        const now = new Date(); let f, t = now;
+        if (k === 'all') {
+            let min = _rpDate(now);
+            _pmSalesSrc().forEach(inv => { if (inv.draft || inv.track !== 'B') return; const d = new Date(inv.timestamp); if (!isNaN(d) && _rpDate(d) < min) min = _rpDate(d); });
+            f = new Date(min + 'T12:00:00');
+        }
+        else if (k === 'month') f = new Date(now.getFullYear(), now.getMonth(), 1);
+        else if (k === 'last') { f = new Date(now.getFullYear(), now.getMonth() - 1, 1); t = new Date(now.getFullYear(), now.getMonth(), 0); }
+        else if (k === '7') f = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 6);
+        else if (k === '30') f = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 29);
+        else f = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+        _plRange.from = _rpDate(f); _plRange.to = _rpDate(t);
+        document.getElementById('pl-from').value = _plRange.from;
+        document.getElementById('pl-to').value = _plRange.to;
+        renderPlTab();
+    }
+    function plView(v){ _plView = v; renderPlTab(); }
+    function plSort(s){ _plSort = s; renderPlTab(); }
+    function plSearch(v){ _plSearch = v; renderPlTab(); const el = document.getElementById('pl-q'); if (el) { el.focus(); el.setSelectionRange(v.length, v.length); } }
+    function plToggle(enc){ const k = decodeURIComponent(enc); _plOpen[k] = !_plOpen[k]; renderPlTab(); }
+    function plExpToggle(enc){
+        const g = decodeURIComponent(enc), m = _plExpMap();
+        m[g] = !_plExpOn(g);
+        try { localStorage.setItem('pm_pl_exp_set', JSON.stringify(m)); } catch (e) {}
+        renderPlTab();
+    }
+
+    // tag number -> Tag Generator record (only those that have a tag number)
+    function _plTagMap(){
+        const m = {};
+        Object.keys(tgTags || {}).forEach(k => { const t = tgTags[k]; if (!t) return; m[_plKey(t.tagNo || k)] = t; });
+        return m;
+    }
+    // Cost of ONE sold invoice line. Returns null when the tag carries no purchase cost.
+    function _plCost(item, tag, saleTs){
+        if (!tag) return null;
+        if (tag.ts && saleTs && +tag.ts > saleTs) return null;   // tag made AFTER this sale = reused number: the record is a different item
+        const nw = _plNum(item.nlWt) || _plNum(tag.nw), pcs = (item.pc || _plNum(tag.pcs) || 1);
+        const tunch = _plNum(tag.tunch), pw = _plNum(tag.pw);
+        // fixed all-in rupee costs, same as the Tag Generator's own cost column
+        if (_plNum(tag.prate) > 0) return { cost: nw * _plNum(tag.prate), metal: 0, making: nw * _plNum(tag.prate), fine: 0, basis: 'PRATE/g' };
+        if (_plNum(tag.ppc) > 0)   return { cost: pcs * _plNum(tag.ppc), metal: 0, making: pcs * _plNum(tag.ppc), fine: 0, basis: 'PRATE/pc' };
+        if (!(tunch > 0)) return null;   // no tunch = no pure-metal cost to value
+        const mw = getInvoiceItemPureGrams(item);
+        const metalKey = mw ? mw.metal.toLowerCase() : String(item.metal || tag.cat || '').toLowerCase().includes('gold') ? 'gold' : 'silver';
+        let pureRate = _plNum(item.pureRate);
+        if (!(pureRate > 0)) { const r = _plNum(item.rate), ratio = _purityRatio(metalKey, item.stamp || tag.stamp || ''); pureRate = (r > 0 && ratio > 0) ? r / ratio : 0; }
+        if (!(pureRate > 0)) pureRate = getPureRate(metalKey);
+        if (!(pureRate > 0)) return null;
+        const fine = nw * (tunch + pw) / 100;
+        const metal = fine * pureRate;
+        const lab = _plNum(tag.lpc) > 0 ? pcs * _plNum(tag.lpc) : nw * _plNum(tag.lab);
+        const making = lab + nw * _plNum(tag.pwt) + pcs * _plNum(tag.prs) + (_plNum(tag.pp) > 0 ? (nw * tunch / 100 * pureRate) * _plNum(tag.pp) / 100 : 0);
+        return { cost: metal + making, metal, making, fine, basis: 'pure @ ' + Math.round(pureRate) };
+    }
+
+    function plCompute(from, to){
+        const tmap = _plTagMap();
+        const out = { rows: [], noCost: [], untagged: { rev: 0, n: 0 }, bills: 0, expenses: {}, expTotal: 0 };
+        _pmSalesSrc().forEach(inv => {
+            if (inv.draft || inv.track !== 'B') return;
+            const d = new Date(inv.timestamp); if (isNaN(d)) return;
+            const day = _rpDate(d); if (day < from || day > to) return;
+            out.bills++;
+            const t = inv.totals || {};
+            // discount (before GST) is spread over the bill's lines in proportion to their value
+            const f = (t.sub > 0 && t.disc > 0) ? Math.max(0, Math.min(1, (t.sub - t.disc) / t.sub)) : 1;
+            (inv.items || []).forEach(item => {
+                const rev = invTaxableVal(item) * f;
+                const bc = _plKey(item.barcode);
+                const name = _pmItemName(item, item.itemName || (bc && productData[item.barcode] && productData[item.barcode].itemName) || (item.desc || 'Unnamed Item').trim());
+                if (item.isCustom || !bc) { out.untagged.rev += rev; out.untagged.n++; return; }
+                const tag = tmap[bc], c = _plCost(item, tag, d.getTime());
+                const row = { tag: bc, day, ts: d.getTime(), name, supplier: (tag && tag.supplier) || '', nw: _plNum(item.nlWt), rev, inv: inv.invoiceNo || inv.billNo || '' };
+                if (!c) { row.why = !tag ? 'no Tag Generator record' : (tag.ts && +tag.ts > d.getTime() ? 'tag number reused' : 'no purchase cost on tag'); out.noCost.push(row); return; }
+                row.cost = c.cost; row.metal = c.metal; row.making = c.making; row.fine = c.fine; row.basis = c.basis;
+                row.profit = rev - c.cost; row.margin = rev > 0 ? row.profit / rev * 100 : 0;
+                out.rows.push(row);
+            });
+        });
+        _pmCashSrc().forEach(e => {
+            if ((e.track || 'A') !== 'B' || e.type !== 'expense' || !e.date || e.date < from || e.date > to) return;
+            if (e.categoryId === 'cat_supplier' || e.supplier || e.categoryId === 'cat_oldjewellery') return;   // goods, not running expenses
+            const g = e.categoryName || 'Unassigned';
+            const x = out.expenses[g] = out.expenses[g] || { total: 0, list: [] };
+            x.total += e.amount || 0; x.list.push(e);
+            if (_plExpOn(g)) out.expTotal += e.amount || 0;
+        });
+        return out;
+    }
+
+    function _plAgg(rows, keyFn, labelFn){
+        const m = {};
+        rows.forEach(r => {
+            const k = keyFn(r); const a = m[k] = m[k] || { key: k, label: labelFn ? labelFn(r) : k, n: 0, nw: 0, rev: 0, cost: 0, profit: 0 };
+            a.n++; a.nw += r.nw; a.rev += r.rev; a.cost += r.cost; a.profit += r.profit;
+        });
+        return Object.values(m);
+    }
+    const _plCol = v => v >= 0 ? '#2E7D32' : '#C62828';
+    const _plPct = (p, r) => r > 0 ? (p / r * 100).toFixed(1) + '%' : '–';
+    function _plBtn(label, active, on){ return `<button onclick="${on}" style="flex:1; padding:8px 4px; font-size:12px; font-weight:700; border:1.5px solid ${active ? 'var(--gold)' : 'var(--border)'}; border-radius:8px; background:${active ? 'var(--gold)' : 'white'}; color:${active ? '#fff' : 'var(--text)'}; margin:0;">${label}</button>`; }
+
+    function renderPlTab(){
+        const body = document.getElementById('pl-body'); if (!body) return;
+        if (currentInvTrack !== 'B') { body.innerHTML = ''; return; }
+        plInitDates();
+        const from = _plRange.from, to = _plRange.to;
+        if (!from || !to || from > to) { body.innerHTML = '<div class="note">Pick a valid date range.</div>'; return; }
+        if (!Object.keys(tgTags || {}).length && !_pmLoaded.tgTags) { body.innerHTML = '<div class="note">Loading tag costs…</div>'; return; }
+        const D = plCompute(from, to);
+        const gRev = D.rows.reduce((s, r) => s + r.rev, 0), gCost = D.rows.reduce((s, r) => s + r.cost, 0), gProfit = gRev - gCost;
+        const noRev = D.noCost.reduce((s, r) => s + r.rev, 0);
+        const net = gProfit - D.expTotal;
+        let h = `<div style="display:flex; gap:6px; margin-bottom:10px;">${[['sum', 'Summary'], ['tags', 'Tags'], ['items', 'Items'], ['sup', 'Suppliers'], ['exp', 'Expenses']].map(([k, l]) => _plBtn(l, _plView === k, `plView('${k}')`)).join('')}</div>`;
+
+        if (_plView === 'sum') {
+            const card = (l, v, col, sub) => `<div style="${_cardCss} margin:0;"><div style="${_hdCss} margin-bottom:6px;">${l}</div><div style="font-size:19px; font-weight:800; color:${col || 'var(--text)'};">${v}</div>${sub ? `<div style="font-size:10.5px; color:var(--text2); margin-top:2px;">${sub}</div>` : ''}</div>`;
+            h += `<div style="display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; margin-bottom:12px;">
+                ${card('Sales (tags with cost)', _rpFmt(gRev), '', D.rows.length + ' pieces · excl. GST')}
+                ${card('Cost of those pieces', _rpFmt(gCost), '', 'metal at sold pure rate + making')}
+                ${card('Gross profit', _rpFmt(gProfit), _plCol(gProfit), _plPct(gProfit, gRev) + ' margin')}
+                ${card('Expenses', _rpFmt(D.expTotal), '#C62828', 'from the cash book')}
+            </div>
+            <div style="${_cardCss} border-left:4px solid ${_plCol(net)};"><div style="${_hdCss}">Net profit</div><div style="font-size:26px; font-weight:800; color:${_plCol(net)};">${_rpFmt(net)}</div><div style="font-size:11px; color:var(--text2); margin-top:4px;">${D.bills} bills · ${_rpShort(from)} – ${_rpShort(to)}</div></div>`;
+            const miss = noRev + D.untagged.rev;
+            if (D.noCost.length || D.untagged.n) h += `<div style="${_cardCss} font-size:12px; line-height:1.6; background:#FFF8E1;"><b>Not in profit (no cost to compare):</b><br>
+                ${D.noCost.length} tags with no cost on record · ${_rpFmt(noRev)} sales<br>
+                ${D.untagged.n} loose / custom lines · ${_rpFmt(D.untagged.rev)} sales<br>
+                <span style="color:var(--text2);">Total ${_rpFmt(miss)} of sales is left out of gross profit. Open the Tags tab to see which tags.</span></div>`;
+            // monthly strip
+            const mm = {}; D.rows.forEach(r => { const k = r.day.slice(0, 7); mm[k] = mm[k] || { rev: 0, profit: 0 }; mm[k].rev += r.rev; mm[k].profit += r.profit; });
+            const ks = Object.keys(mm).sort();
+            if (ks.length > 1) h += `<div style="${_cardCss}"><div style="${_hdCss}">By month (gross)</div>${ks.map(k => `<div style="display:flex; justify-content:space-between; font-size:13px; padding:5px 0; border-top:1px solid var(--border);"><span>${k}</span><span>${_rpFmt(mm[k].rev)} <b style="color:${_plCol(mm[k].profit)}; margin-left:8px;">${_rpFmt(mm[k].profit)}</b></span></div>`).join('')}</div>`;
+        }
+
+        if (_plView === 'tags') {
+            const q = _plSearch.trim().toUpperCase();
+            let rows = D.rows.concat(D.noCost.map(r => ({ ...r, nocost: true })));
+            if (q) rows = rows.filter(r => r.tag.includes(q) || String(r.name).toUpperCase().includes(q) || String(r.supplier).toUpperCase().includes(q));
+            const sorters = { date: (a, b) => b.ts - a.ts, profit: (a, b) => (b.profit || -1e12) - (a.profit || -1e12), loss: (a, b) => (a.nocost ? 1e12 : a.profit) - (b.nocost ? 1e12 : b.profit), margin: (a, b) => (b.margin || -1e9) - (a.margin || -1e9) };
+            rows.sort(sorters[_plSort]);
+            h += `<input id="pl-q" type="search" placeholder="Search tag, item or supplier" value="${_rpEsc(_plSearch)}" oninput="plSearch(this.value)" style="margin:0 0 8px;">
+                <div style="display:flex; gap:6px; margin-bottom:8px;">${[['date', 'Latest'], ['profit', 'Top profit'], ['loss', 'Lowest'], ['margin', 'Margin %']].map(([k, l]) => _plBtn(l, _plSort === k, `plSort('${k}')`)).join('')}</div>
+                <div style="display:flex; justify-content:space-between; align-items:center; font-size:12px; color:var(--text2); margin-bottom:6px;"><span>${rows.length} pieces</span><button onclick="plCsv()" style="width:auto; margin:0; padding:5px 12px; font-size:12px; font-weight:700; background:white; border:1.5px solid var(--border); border-radius:8px; color:var(--text);">⬇ CSV</button></div>`;
+            const cap = rows.slice(0, 300);
+            h += `<div style="${_cardCss} padding:4px 12px;">` + (cap.map(r => {
+                const k = 't|' + r.tag + '|' + r.ts, open = !!_plOpen[k];
+                const right = r.nocost ? `<span style="font-size:11px; color:var(--text2);">no cost</span>` : `<b style="color:${_plCol(r.profit)};">${_rpFmt(r.profit)}</b>`;
+                return `<div onclick="plToggle('${_rpEnc(k)}')" style="padding:9px 0; border-top:1px solid var(--border); cursor:pointer;">
+                    <div style="display:flex; justify-content:space-between; gap:8px; font-size:13px;"><span><b>${_rpEsc(r.tag)}</b> <span style="color:var(--text2); font-size:11px;">${_rpEsc(r.name)}</span></span>${right}</div>
+                    <div style="display:flex; justify-content:space-between; font-size:11px; color:var(--text2);"><span>${_rpShort(r.day)} · ${r.nw.toFixed(3)} g${r.supplier ? ' · ' + _rpEsc(r.supplier) : ''}</span><span>${r.nocost ? _rpEsc(r.why) : 'sold ' + _rpFmt(r.rev) + ' · ' + r.margin.toFixed(0) + '%'}</span></div>
+                    ${open && !r.nocost ? `<div style="font-size:11.5px; line-height:1.7; margin-top:6px; padding:8px; background:var(--bg,#faf7f2); border-radius:8px;">Sold for <b>${_rpFmt(r.rev)}</b> (excl. GST)<br>Metal cost ${_rpFmt(r.metal)} <span style="color:var(--text2);">(${r.fine.toFixed(3)} g fine, ${_rpEsc(r.basis)})</span><br>Making / labour ${_rpFmt(r.making)}<br>Profit <b style="color:${_plCol(r.profit)};">${_rpFmt(r.profit)}</b></div>` : ''}
+                </div>`;
+            }).join('') || '<div class="note" style="padding:10px 0;">Nothing in this range.</div>') + '</div>';
+            if (rows.length > cap.length) h += `<div class="note" style="text-align:center;">Showing the first ${cap.length}. Narrow the dates or search to see the rest, or export CSV for everything.</div>`;
+        }
+
+        if (_plView === 'items' || _plView === 'sup') {
+            const isI = _plView === 'items';
+            const agg = _plAgg(D.rows, r => isI ? r.name : (r.supplier || 'No supplier')).sort((a, b) => b.profit - a.profit);
+            h += `<div style="${_cardCss} padding:4px 12px;"><div style="display:grid; grid-template-columns:1.6fr 1fr 1fr; gap:6px; font-size:10px; font-weight:700; color:var(--text2); text-transform:uppercase; padding:8px 0;"><span>${isI ? 'Item' : 'Supplier'}</span><span style="text-align:right;">Sold</span><span style="text-align:right;">Profit</span></div>` +
+                (agg.map(a => `<div style="display:grid; grid-template-columns:1.6fr 1fr 1fr; gap:6px; font-size:13px; padding:9px 0; border-top:1px solid var(--border);"><span style="min-width:0; overflow-wrap:anywhere;">${_rpEsc(a.label)}<div style="font-size:10.5px; color:var(--text2);">${a.n} pcs · ${a.nw.toFixed(1)} g</div></span><span style="text-align:right;">${_rpFmt(a.rev)}</span><span style="text-align:right; font-weight:800; color:${_plCol(a.profit)};">${_rpFmt(a.profit)}<div style="font-size:10.5px; font-weight:600; color:var(--text2);">${_plPct(a.profit, a.rev)}</div></span></div>`).join('') || '<div class="note" style="padding:10px 0;">Nothing in this range.</div>') + '</div>';
+        }
+
+        if (_plView === 'exp') {
+            const gs = Object.keys(D.expenses).sort((a, b) => D.expenses[b].total - D.expenses[a].total);
+            h += `<div style="${_cardCss}"><div style="${_hdCss}">Expenses counted in net profit</div><div style="font-size:11px; color:var(--text2); margin-bottom:8px;">Supplier payments and old-jewellery purchases are not expenses here, they are goods. Bank deposits, drawings, loans and personal are off by default. Tick or untick any category.</div>` +
+                (gs.map(g => `<label style="display:flex; align-items:center; gap:10px; padding:9px 0; border-top:1px solid var(--border); font-size:13px; margin:0; cursor:pointer;"><input type="checkbox" ${_plExpOn(g) ? 'checked' : ''} onchange="plExpToggle('${_rpEnc(g)}')" style="width:auto; margin:0;"><span style="flex:1;">${_rpEsc(g)}<span style="font-size:10.5px; color:var(--text2); margin-left:6px;">${D.expenses[g].list.length} entries</span></span><b>${_rpFmt(D.expenses[g].total)}</b></label>`).join('') || '<div class="note">No expense entries in this range.</div>') +
+                `<div style="display:flex; justify-content:space-between; font-size:14px; font-weight:800; padding-top:10px; border-top:2px solid var(--border);"><span>Counted</span><span>${_rpFmt(D.expTotal)}</span></div></div>`;
+        }
+        body.innerHTML = h;
+    }
+
+    function plCsv(){
+        const D = plCompute(_plRange.from, _plRange.to), q = (v) => '"' + String(v == null ? '' : v).replace(/"/g, '""') + '"';
+        const lines = ['Date,Tag,Item,Supplier,Net wt,Sold (excl GST),Metal cost,Making/labour,Cost,Profit,Margin %,Note'];
+        D.rows.forEach(r => lines.push([r.day, r.tag, q(r.name), q(r.supplier), r.nw.toFixed(3), r.rev.toFixed(2), r.metal.toFixed(2), r.making.toFixed(2), r.cost.toFixed(2), r.profit.toFixed(2), r.margin.toFixed(1), q(r.basis)].join(',')));
+        D.noCost.forEach(r => lines.push([r.day, r.tag, q(r.name), q(r.supplier), r.nw.toFixed(3), r.rev.toFixed(2), '', '', '', '', '', q('NO COST: ' + r.why)].join(',')));
+        _rpDownload('pnl_' + _plRange.from + '_to_' + _plRange.to + '.csv', lines.join('\n'), 'text/csv');
+    }
+
     // ── Tab switcher ──
     let _pmActiveTab = 'purchase';
     function pmSwitchTab(name){
@@ -2985,12 +3232,15 @@ function computeCombinedAvgRate(metal){
         document.getElementById('pm-pane-sales').style.display = name === 'sales' ? '' : 'none';
         document.getElementById('pm-pane-purchase').style.display = name === 'purchase' ? '' : 'none';
         document.getElementById('pm-pane-report').style.display = name === 'report' ? '' : 'none';
+        document.getElementById('pm-pane-pl').style.display = name === 'pl' ? '' : 'none';
+        document.getElementById('pm-tab-pl').style.color = name === 'pl' ? 'var(--gold)' : 'var(--text2)';
         document.getElementById('pm-tab-sales').style.color = name === 'sales' ? 'var(--gold)' : 'var(--text2)';
         document.getElementById('pm-tab-purchase').style.color = name === 'purchase' ? 'var(--gold)' : 'var(--text2)';
         document.getElementById('pm-tab-report').style.color = name === 'report' ? 'var(--gold)' : 'var(--text2)';
         if (name === 'sales') invInitReportDates();
         if (name === 'purchase') renderPurchaseTab();
         if (name === 'report') renderReportTab();
+        if (name === 'pl') renderPlTab();
     }
 
     // ── Sales Report (ported from POS.html's Invoice > Report tab) ──
