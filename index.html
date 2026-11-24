@@ -3098,9 +3098,9 @@ function computeCombinedAvgRate(metal){
         if (_plNum(tag.dcost) > 0) return { cost: _plNum(tag.dcost), metal: 0, making: _plNum(tag.dcost), fine: 0, basis: 'direct cost' };   // manual: total rupees for the piece
         if (!(tunch > 0)) return null;   // no tunch = no pure-metal cost to value
         const mw = getInvoiceItemPureGrams(item);
-        const metalKey = tag.mmetal ? String(tag.mmetal).toLowerCase() : mw ? mw.metal.toLowerCase() : String(item.metal || tag.cat || '').toLowerCase().includes('gold') ? 'gold' : 'silver';
+        const metalKey = mw ? mw.metal.toLowerCase() : tag.mmetal ? String(tag.mmetal).toLowerCase() : String(item.metal || tag.cat || '').toLowerCase().includes('gold') ? 'gold' : 'silver';
         let pureRate = _plNum(item.pureRate);
-        if (!(pureRate > 0)) { const r = _plNum(item.rate), ratio = _purityRatio(metalKey, tag.mstamp || item.stamp || tag.stamp || ''); pureRate = (r > 0 && ratio > 0) ? r / ratio : 0; }
+        if (!(pureRate > 0)) { const r = _plNum(item.rate), ratio = _purityRatio(metalKey, item.stamp || tag.mstamp || tag.stamp || ''); pureRate = (r > 0 && ratio > 0) ? r / ratio : 0; }
         if (!(pureRate > 0)) pureRate = getPureRate(metalKey);
         if (!(pureRate > 0)) return null;
         const fine = nw * (tunch + pw) / 100;
