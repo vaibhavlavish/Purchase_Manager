@@ -3156,7 +3156,9 @@ function computeCombinedAvgRate(metal){
                 const tag = tmap[bc], ov = pmCostTags[_plFbKey(bc)];
                 let c = _plCost(item, tag, d.getTime()), manual = false;
                 if (!c && ov) { c = _plCost(item, _plManualTag(ov, item), d.getTime()); manual = !!c; }   // Tag Generator cost wins; manual entry only fills a gap
-                const row = { tag: bc, day, ts: d.getTime(), name, supplier: (tag && tag.supplier) || '', nw: _plNum(item.nlWt), rev, inv: inv.invoiceNo || inv.billNo || '', item, manual };
+                const nkey = String(name).trim().toLowerCase();
+                if (!c) { const np = pmCostLoose[_plFbKey(nkey)]; if (np) { c = _plCost(item, _plManualTag(np, item), d.getTime()); manual = !!c; } }   // cost saved for the whole item name
+                const row = { tag: bc, lk: nkey, lname: name, day, ts: d.getTime(), name, supplier: (tag && tag.supplier) || '', nw: _plNum(item.nlWt), rev, inv: inv.invoiceNo || inv.billNo || '', item, manual };
                 if (!c) { row.why = !tag ? 'no Tag Generator record' : (tag.ts && +tag.ts > d.getTime() ? 'tag number reused' : 'no purchase cost on tag'); out.noCost.push(row); return; }
                 row.cost = c.cost; row.metal = c.metal; row.making = c.making; row.fine = c.fine; row.basis = c.basis;
                 row.profit = rev - c.cost; row.margin = rev > 0 ? row.profit / rev * 100 : 0;
@@ -3253,7 +3255,7 @@ function computeCombinedAvgRate(metal){
                 (agg.map(a => `<div style="display:grid; grid-template-columns:1.6fr 1fr 1fr; gap:6px; font-size:13px; padding:9px 0; border-top:1px solid var(--border);"><span style="min-width:0; overflow-wrap:anywhere;">${_rpEsc(a.label)}<div style="font-size:10.5px; color:var(--text2);">${a.n} pcs · ${a.nw.toFixed(1)} g</div></span><span style="text-align:right;">${_rpFmt(a.rev)}</span><span style="text-align:right; font-weight:800; color:${_plCol(a.profit)};">${_rpFmt(a.profit)}<div style="font-size:10.5px; font-weight:600; color:var(--text2);">${_plPct(a.profit, a.rev)}</div></span></div>`).join('') || '<div class="note" style="padding:10px 0;">Nothing in this range.</div>') + '</div>';
             // lines with no cost yet (loose items, tags without cost) - sold but not in profit
             const nm = {};
-            D.noCost.forEach(r => { const k = isI ? r.name : (r.supplier || 'No supplier'); const a = nm[k] = nm[k] || { label: k, n: 0, nw: 0, rev: 0, lk: r.loose ? _plFbKey(r.lk) : '', ln: r.loose ? r.lname : '' }; a.n++; a.nw += r.nw; a.rev += r.rev; });
+            D.noCost.forEach(r => { const k = isI ? r.name : (r.supplier || 'No supplier'); const a = nm[k] = nm[k] || { label: k, n: 0, nw: 0, rev: 0, lk: isI ? _plFbKey(r.lk) : '', ln: isI ? r.lname : '' }; a.n++; a.nw += r.nw; a.rev += r.rev; });
             const nl = Object.values(nm).sort((a, b) => b.rev - a.rev);
             if (nl.length) h += `<div style="${_cardCss} padding:4px 12px; background:#FFF8E1;"><div style="${_hdCss} padding-top:10px;">Sold, no cost entered (not in profit)</div>` + nl.map(a => `<div ${a.lk ? `onclick="plCostOpenLoose('${_rpEnc(a.lk)}', null, '${_rpEnc(a.ln)}')"` : ''} style="display:grid; grid-template-columns:1.6fr 1fr 1fr; gap:6px; font-size:13px; padding:9px 0; border-top:1px solid var(--border); ${a.lk ? 'cursor:pointer;' : ''}"><span style="min-width:0; overflow-wrap:anywhere;">${_rpEsc(a.label)}<div style="font-size:10.5px; color:var(--text2);">${a.n} pcs · ${a.nw.toFixed(1)} g</div></span><span style="text-align:right;">${_rpFmt(a.rev)}</span><span style="text-align:right; font-size:11px; font-weight:700; color:#B26A00;">${a.lk ? '+ add cost' : 'no cost'}</span></div>`).join('') + `</div>`;
         }
@@ -3303,14 +3305,17 @@ function computeCombinedAvgRate(metal){
         const r = c.row;
         let title, info = '';
         if (c.kind === 'tag') { title = 'Cost of tag ' + _rpEsc(c.key); }
-        else { title = 'Loose / preset cost'; }
+        else { title = 'Cost for an item / preset'; }
         if (r) info = `<div style="font-size:12px; color:var(--text2); margin-bottom:10px;">${_rpEsc(r.name)} · ${r.nw.toFixed(3)} g · sold ${_rpFmt(r.rev)} incl. GST</div>`;
         let target = '';
+        if (c.kind === 'tag' && r && r.lname) {
+            target = `<label style="${lbl}">Apply this cost to</label><select id="plc-scope" style="${inp} margin-bottom:10px;"><option value="tag">This tag only (${_rpEsc(c.key)})</option><option value="name">All sales of "${_rpEsc(r.lname)}" that have no cost</option></select>`;
+        }
         if (c.kind === 'loose') {
             const names = []; const seen = {};
             const add = n => { n = String(n || '').trim(); if (n && !seen[n.toLowerCase()]) { seen[n.toLowerCase()] = 1; names.push(n); } };
             add(c.name); (posPresets || []).forEach(p => add(p.name));
-            target = `<label style="${lbl}">Applies to every loose sale of</label><select id="plc-name" style="${inp} margin-bottom:10px;">${names.map(n => `<option value="${_rpEsc(n)}" ${n.toLowerCase() === String(c.name || '').toLowerCase() ? 'selected' : ''}>${_rpEsc(n)}</option>`).join('')}</select>`;
+            target = `<label style="${lbl}">Applies to every sale of (that has no cost)</label><select id="plc-name" style="${inp} margin-bottom:10px;">${names.map(n => `<option value="${_rpEsc(n)}" ${n.toLowerCase() === String(c.name || '').toLowerCase() ? 'selected' : ''}>${_rpEsc(n)}</option>`).join('')}</select>`;
         }
         document.getElementById('pl-cost-panel').innerHTML = `
             <div style="position:sticky; top:0; background:white; padding:18px 0 8px; display:flex; justify-content:space-between; align-items:center;"><h3 style="margin:0; font-size:17px;">${title}</h3><button onclick="plCostClose()" style="width:34px; height:34px; margin:0; padding:0; border:none; border-radius:50%; background:#eee; color:#333; font-weight:800; box-shadow:none;">✕</button></div>
@@ -3374,7 +3379,11 @@ function computeCombinedAvgRate(metal){
         if (_plCd.mode === 'tunch' && !(rec.tunch > 0) ) { showCustomAlert('Tunch is needed for this option. Use Direct cost if you only know the rupee cost.'); return; }
         rec.at = Date.now();
         try {
-            if (_plCd.kind === 'tag') {
+            const sc = document.getElementById('plc-scope');
+            if (_plCd.kind === 'tag' && sc && sc.value === 'name') {
+                const nm = String(_plCd.row.lname).trim();
+                await window.dbUpdate(window.dbRef(window.firebaseDB, 'pmMeta/costLoose'), { [_plFbKey(nm.toLowerCase())]: Object.assign({ name: nm }, rec) });
+            } else if (_plCd.kind === 'tag') {
                 await window.dbUpdate(window.dbRef(window.firebaseDB, 'pmMeta/costTags'), { [_plCd.fb]: Object.assign({ tag: _plCd.key }, rec) });
             } else {
                 const nm = (document.getElementById('plc-name').value || '').trim();
