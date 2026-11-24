@@ -619,6 +619,10 @@
     <div id="area-detail-panel" style="background:white; border-radius:20px 20px 0 0; width:100%; max-width:560px; max-height:92vh; overflow-y:auto; box-shadow:0 -8px 32px rgba(0,0,0,0.15);"></div>
 </div>
 
+<div id="pl-cost-modal" onclick="if(event.target===this) plCostClose()" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.55); z-index:1160; align-items:flex-end; justify-content:center;">
+    <div id="pl-cost-panel" style="background:white; border-radius:20px 20px 0 0; width:100%; max-width:480px; padding:0 20px 30px; max-height:90vh; overflow-y:auto; box-shadow:0 -8px 32px rgba(0,0,0,0.15);"></div>
+</div>
+
 <div id="pm-alert-modal">
     <div id="pm-alert-panel" style="text-align:center;">
         <div style="position:sticky; top:0; z-index:3; background:white; margin:0 -20px 10px; padding:22px 54px 10px; text-align:center;">
@@ -783,6 +787,12 @@
             _pmLoaded.tgTags = true;
             _pmRerenderSoon();
         }, err => console.error('[TagsoftTags] read error', err));
+
+        // Manual purchase cost for tags / loose items that carry none on the Tag Generator (PM-owned, written from the P&L tab)
+        window.dbOnValue(window.dbRef(window.firebaseDB, 'pmMeta/costTags'), snap => { pmCostTags = snap.val() || {}; _pmRerenderSoon(); }, err => console.error('[CostTags] read error', err));
+        window.dbOnValue(window.dbRef(window.firebaseDB, 'pmMeta/costLoose'), snap => { pmCostLoose = snap.val() || {}; _pmRerenderSoon(); }, err => console.error('[CostLoose] read error', err));
+        // POS loose presets (read-only) so a loose cost can be linked to a preset
+        window.dbOnValue(window.dbRef(window.firebaseDB, 'jewelryData/profiles/presets'), snap => { posPresets = Object.values(snap.val() || {}).filter(x => x && x.name); }, err => console.error('[PosPresets] read error', err));
 
         // The Purchase Manager keeps its OWN copy of invoices (pmSales), written by
         // the POS at save time — so clearing invoices in the POS never affects it.
@@ -3008,7 +3018,7 @@ function computeCombinedAvgRate(metal){
 
     // ═══════════════════════════════════════════════════════════
     // P&L (Track B only) — tag-wise profit, valued at the PURE RATE THE ITEM WAS SOLD AT
-    //   Revenue  = item taxable value (metal + making), discount spread across the bill's items, GST excluded
+    //   Revenue  = item taxable value (metal + making), discount spread across the bill's items, PLUS the bill's GST
     //   Cost     = the tag's purchase side from the Tag Generator (tagsoft/tags):
     //              fine weight (net wt x (tunch + P/wstg) / 100) x pure rate saved on that invoice item
     //              + rupee purchase making (P/%, P/wt, P/Rs) + labour (Labour/g or /pc)
@@ -3017,9 +3027,10 @@ function computeCombinedAvgRate(metal){
     // Read-only: nothing here writes to Firebase.
     // ═══════════════════════════════════════════════════════════
     let tgTags = {};
+    let pmCostTags = {}, pmCostLoose = {}, posPresets = [];   // manual costs: by tag no / by loose item (or preset) name
     const _plRange = { from: '', to: '' };
     let _plView = 'sum', _plSort = 'date', _plSearch = '';
-    const _plOpen = {};
+    const _plOpen = {}, _plRowMap = {};
     function _plNum(v){ const x = parseFloat(v); return isNaN(x) ? 0 : x; }
     function _plKey(s){ return String(s == null ? '' : s).trim().toUpperCase(); }
     // Which cash-book expense categories count as running costs. Money moved to the bank, drawings, loans, personal use
@@ -3084,6 +3095,7 @@ function computeCombinedAvgRate(metal){
         // fixed all-in rupee costs, same as the Tag Generator's own cost column
         if (_plNum(tag.prate) > 0) return { cost: nw * _plNum(tag.prate), metal: 0, making: nw * _plNum(tag.prate), fine: 0, basis: 'PRATE/g' };
         if (_plNum(tag.ppc) > 0)   return { cost: pcs * _plNum(tag.ppc), metal: 0, making: pcs * _plNum(tag.ppc), fine: 0, basis: 'PRATE/pc' };
+        if (_plNum(tag.dcost) > 0) return { cost: _plNum(tag.dcost), metal: 0, making: _plNum(tag.dcost), fine: 0, basis: 'direct cost' };   // manual: total rupees for the piece
         if (!(tunch > 0)) return null;   // no tunch = no pure-metal cost to value
         const mw = getInvoiceItemPureGrams(item);
         const metalKey = mw ? mw.metal.toLowerCase() : String(item.metal || tag.cat || '').toLowerCase().includes('gold') ? 'gold' : 'silver';
@@ -3098,6 +3110,20 @@ function computeCombinedAvgRate(metal){
         return { cost: metal + making, metal, making, fine, basis: 'pure @ ' + Math.round(pureRate) };
     }
 
+    // ── Manual costs (tags / loose items with no cost on the Tag Generator) ──
+    function _plFbKey(k){ return encodeURIComponent(String(k)).replace(/\./g, '%2E').replace(/%/g, '_'); }
+    function _plLooseName(item){ return String(item.presetName || item.itemName || item.desc || 'Loose item').trim(); }
+    function _plLooseKey(item){ return _plLooseName(item).toLowerCase(); }
+    // a saved manual record -> the same field names the Tag Generator uses, so _plCost reads it unchanged
+    function _plManualTag(rec, item){
+        const o = { nw: _plNum(item.nlWt), pcs: item.pc || 1 };
+        if (_plNum(rec.tunch) > 0) { o.tunch = _plNum(rec.tunch); o.pw = _plNum(rec.pw); if (_plNum(rec.lab) > 0) o.lab = _plNum(rec.lab); if (_plNum(rec.lpc) > 0) o.lpc = _plNum(rec.lpc); }
+        if (_plNum(rec.prate) > 0) o.prate = _plNum(rec.prate);
+        if (_plNum(rec.ppc) > 0) o.ppc = _plNum(rec.ppc);
+        if (_plNum(rec.dcost) > 0) o.dcost = _plNum(rec.dcost);
+        return o;
+    }
+
     function plCompute(from, to){
         const tmap = _plTagMap();
         const out = { rows: [], noCost: [], untagged: { rev: 0, n: 0 }, bills: 0, expenses: {}, expTotal: 0 };
@@ -3109,13 +3135,28 @@ function computeCombinedAvgRate(metal){
             const t = inv.totals || {};
             // discount (before GST) is spread over the bill's lines in proportion to their value
             const f = (t.sub > 0 && t.disc > 0) ? Math.max(0, Math.min(1, (t.sub - t.disc) / t.sub)) : 1;
+            // GST of this bill as a fraction of its taxable value: sales are counted INCLUDING tax
+            const _taxAmt = (t.sgst || 0) + (t.cgst || 0) + (t.igst || 0);
+            const gstF = t.taxable > 0 ? _taxAmt / t.taxable : (taxRateCfg / 100);
             (inv.items || []).forEach(item => {
-                const rev = invTaxableVal(item) * f;
+                const rev = invTaxableVal(item) * f * (item.taxInclusive ? 1 : 1 + gstF);
                 const bc = _plKey(item.barcode);
                 const name = _pmItemName(item, item.itemName || (bc && productData[item.barcode] && productData[item.barcode].itemName) || (item.desc || 'Unnamed Item').trim());
+                // loose / preset line (weighed metal, no barcode): cost comes from a manual entry saved under its name
+                if (!bc && !item.isCustom && (item.isLoose || (item.metal && _plNum(item.nlWt) > 0))) {
+                    const lk = _plLooseKey(item), prof = pmCostLoose[_plFbKey(lk)];
+                    const lrow = { tag: 'LOOSE', loose: true, lk, lname: _plLooseName(item), day, ts: d.getTime(), name, supplier: '', nw: _plNum(item.nlWt), rev, inv: inv.invoiceNo || inv.billNo || '', item };
+                    const lc = prof ? _plCost(item, _plManualTag(prof, item), d.getTime()) : null;
+                    if (!lc) { lrow.why = prof ? 'saved cost gives nothing for this line' : 'loose item, no cost entered'; out.noCost.push(lrow); return; }
+                    lrow.manual = true; lrow.cost = lc.cost; lrow.metal = lc.metal; lrow.making = lc.making; lrow.fine = lc.fine; lrow.basis = lc.basis;
+                    lrow.profit = rev - lc.cost; lrow.margin = rev > 0 ? lrow.profit / rev * 100 : 0;
+                    out.rows.push(lrow); return;
+                }
                 if (item.isCustom || !bc) { out.untagged.rev += rev; out.untagged.n++; return; }
-                const tag = tmap[bc], c = _plCost(item, tag, d.getTime());
-                const row = { tag: bc, day, ts: d.getTime(), name, supplier: (tag && tag.supplier) || '', nw: _plNum(item.nlWt), rev, inv: inv.invoiceNo || inv.billNo || '' };
+                const tag = tmap[bc], ov = pmCostTags[_plFbKey(bc)];
+                let c = _plCost(item, tag, d.getTime()), manual = false;
+                if (!c && ov) { c = _plCost(item, _plManualTag(ov, item), d.getTime()); manual = !!c; }   // Tag Generator cost wins; manual entry only fills a gap
+                const row = { tag: bc, day, ts: d.getTime(), name, supplier: (tag && tag.supplier) || '', nw: _plNum(item.nlWt), rev, inv: inv.invoiceNo || inv.billNo || '', item, manual };
                 if (!c) { row.why = !tag ? 'no Tag Generator record' : (tag.ts && +tag.ts > d.getTime() ? 'tag number reused' : 'no purchase cost on tag'); out.noCost.push(row); return; }
                 row.cost = c.cost; row.metal = c.metal; row.making = c.making; row.fine = c.fine; row.basis = c.basis;
                 row.profit = rev - c.cost; row.margin = rev > 0 ? row.profit / rev * 100 : 0;
@@ -3161,21 +3202,25 @@ function computeCombinedAvgRate(metal){
         if (_plView === 'sum') {
             const card = (l, v, col, sub) => `<div style="${_cardCss} margin:0;"><div style="${_hdCss} margin-bottom:6px;">${l}</div><div style="font-size:19px; font-weight:800; color:${col || 'var(--text)'};">${v}</div>${sub ? `<div style="font-size:10.5px; color:var(--text2); margin-top:2px;">${sub}</div>` : ''}</div>`;
             h += `<div style="display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; margin-bottom:12px;">
-                ${card('Sales (tags with cost)', _rpFmt(gRev), '', D.rows.length + ' pieces · excl. GST')}
+                ${card('Sales (with cost)', _rpFmt(gRev), '', D.rows.length + ' pieces · incl. GST')}
                 ${card('Cost of those pieces', _rpFmt(gCost), '', 'metal at sold pure rate + making')}
                 ${card('Gross profit', _rpFmt(gProfit), _plCol(gProfit), _plPct(gProfit, gRev) + ' margin')}
                 ${card('Expenses', _rpFmt(D.expTotal), '#C62828', 'from the cash book')}
             </div>
             <div style="${_cardCss} border-left:4px solid ${_plCol(net)};"><div style="${_hdCss}">Net profit</div><div style="font-size:26px; font-weight:800; color:${_plCol(net)};">${_rpFmt(net)}</div><div style="font-size:11px; color:var(--text2); margin-top:4px;">${D.bills} bills · ${_rpShort(from)} – ${_rpShort(to)}</div></div>`;
             const miss = noRev + D.untagged.rev;
+            const _lpKeys = Object.keys(pmCostLoose || {});
             if (D.noCost.length || D.untagged.n) h += `<div style="${_cardCss} font-size:12px; line-height:1.6; background:#FFF8E1;"><b>Not in profit (no cost to compare):</b><br>
-                ${D.noCost.length} tags with no cost on record · ${_rpFmt(noRev)} sales<br>
-                ${D.untagged.n} loose / custom lines · ${_rpFmt(D.untagged.rev)} sales<br>
-                <span style="color:var(--text2);">Total ${_rpFmt(miss)} of sales is left out of gross profit. Open the Tags tab to see which tags.</span></div>`;
+                ${D.noCost.length} tags / loose lines with no cost on record · ${_rpFmt(noRev)} sales<br>
+                ${D.untagged.n} custom / flat-price lines · ${_rpFmt(D.untagged.rev)} sales<br>
+                <span style="color:var(--text2);">Total ${_rpFmt(miss)} of sales is left out of gross profit. Open the Tags tab and tap a "no cost" line to enter its cost.</span></div>`;
             // monthly strip
             const mm = {}; D.rows.forEach(r => { const k = r.day.slice(0, 7); mm[k] = mm[k] || { rev: 0, profit: 0 }; mm[k].rev += r.rev; mm[k].profit += r.profit; });
             const ks = Object.keys(mm).sort();
             if (ks.length > 1) h += `<div style="${_cardCss}"><div style="${_hdCss}">By month (gross)</div>${ks.map(k => `<div style="display:flex; justify-content:space-between; font-size:13px; padding:5px 0; border-top:1px solid var(--border);"><span>${k}</span><span>${_rpFmt(mm[k].rev)} <b style="color:${_plCol(mm[k].profit)}; margin-left:8px;">${_rpFmt(mm[k].profit)}</b></span></div>`).join('')}</div>`;
+            // saved loose / preset costs
+            h += `<div style="${_cardCss}"><div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;"><div style="${_hdCss} margin:0;">Loose / preset costs</div><button onclick="plCostOpenLoose('')" style="width:auto; margin:0; padding:5px 12px; font-size:12px; font-weight:700; background:white; border:1.5px solid var(--border); border-radius:8px; color:var(--text);">+ Add</button></div>` +
+                (_lpKeys.length ? _lpKeys.map(k => { const r = pmCostLoose[k] || {}; return `<div onclick="plCostOpenLoose('${_rpEnc(k)}')" style="display:flex; justify-content:space-between; gap:8px; font-size:13px; padding:8px 0; border-top:1px solid var(--border); cursor:pointer;"><span>${_rpEsc(r.name || k)}</span><span style="color:var(--text2); font-size:12px;">${_rpEsc(_plRecSummary(r))}</span></div>`; }).join('') : `<div class="note" style="font-size:12px;">Nothing saved yet. Tap a loose line under Tags, or + Add to set the cost of a POS preset. It then applies to every sale of that preset.</div>`) + `</div>`;
         }
 
         if (_plView === 'tags') {
@@ -3189,12 +3234,13 @@ function computeCombinedAvgRate(metal){
                 <div style="display:flex; justify-content:space-between; align-items:center; font-size:12px; color:var(--text2); margin-bottom:6px;"><span>${rows.length} pieces</span><button onclick="plCsv()" style="width:auto; margin:0; padding:5px 12px; font-size:12px; font-weight:700; background:white; border:1.5px solid var(--border); border-radius:8px; color:var(--text);">⬇ CSV</button></div>`;
             const cap = rows.slice(0, 300);
             h += `<div style="${_cardCss} padding:4px 12px;">` + (cap.map(r => {
-                const k = 't|' + r.tag + '|' + r.ts, open = !!_plOpen[k];
-                const right = r.nocost ? `<span style="font-size:11px; color:var(--text2);">no cost</span>` : `<b style="color:${_plCol(r.profit)};">${_rpFmt(r.profit)}</b>`;
-                return `<div onclick="plToggle('${_rpEnc(k)}')" style="padding:9px 0; border-top:1px solid var(--border); cursor:pointer;">
-                    <div style="display:flex; justify-content:space-between; gap:8px; font-size:13px;"><span><b>${_rpEsc(r.tag)}</b> <span style="color:var(--text2); font-size:11px;">${_rpEsc(r.name)}</span></span>${right}</div>
+                const k = 't|' + r.tag + '|' + r.ts + '|' + r.inv + '|' + r.name, open = !!_plOpen[k];
+                _plRowMap[k] = r;
+                const right = r.nocost ? `<span style="font-size:11px; font-weight:700; color:#B26A00;">+ add cost</span>` : `<b style="color:${_plCol(r.profit)};">${_rpFmt(r.profit)}</b>`;
+                return `<div onclick="${r.nocost ? 'plCostOpen' : 'plToggle'}('${_rpEnc(k)}')" style="padding:9px 0; border-top:1px solid var(--border); cursor:pointer;">
+                    <div style="display:flex; justify-content:space-between; gap:8px; font-size:13px;"><span><b>${_rpEsc(r.tag)}</b> <span style="color:var(--text2); font-size:11px;">${_rpEsc(r.name)}${r.manual ? ' · manual cost' : ''}</span></span>${right}</div>
                     <div style="display:flex; justify-content:space-between; font-size:11px; color:var(--text2);"><span>${_rpShort(r.day)} · ${r.nw.toFixed(3)} g${r.supplier ? ' · ' + _rpEsc(r.supplier) : ''}</span><span>${r.nocost ? _rpEsc(r.why) : 'sold ' + _rpFmt(r.rev) + ' · ' + r.margin.toFixed(0) + '%'}</span></div>
-                    ${open && !r.nocost ? `<div style="font-size:11.5px; line-height:1.7; margin-top:6px; padding:8px; background:var(--bg,#faf7f2); border-radius:8px;">Sold for <b>${_rpFmt(r.rev)}</b> (excl. GST)<br>Metal cost ${_rpFmt(r.metal)} <span style="color:var(--text2);">(${r.fine.toFixed(3)} g fine, ${_rpEsc(r.basis)})</span><br>Making / labour ${_rpFmt(r.making)}<br>Profit <b style="color:${_plCol(r.profit)};">${_rpFmt(r.profit)}</b></div>` : ''}
+                    ${open && !r.nocost ? `<div style="font-size:11.5px; line-height:1.7; margin-top:6px; padding:8px; background:var(--bg,#faf7f2); border-radius:8px;">Sold for <b>${_rpFmt(r.rev)}</b> (incl. GST)<br>Metal cost ${_rpFmt(r.metal)} <span style="color:var(--text2);">(${r.fine.toFixed(3)} g fine, ${_rpEsc(r.basis)})</span><br>Making / labour ${_rpFmt(r.making)}<br>Profit <b style="color:${_plCol(r.profit)};">${_rpFmt(r.profit)}</b>${r.manual ? `<br><a onclick="event.stopPropagation(); plCostOpen('${_rpEnc(k)}')" style="color:#B26A00; font-weight:700;">Edit manual cost</a>` : ''}</div>` : ''}
                 </div>`;
             }).join('') || '<div class="note" style="padding:10px 0;">Nothing in this range.</div>') + '</div>';
             if (rows.length > cap.length) h += `<div class="note" style="text-align:center;">Showing the first ${cap.length}. Narrow the dates or search to see the rest, or export CSV for everything.</div>`;
@@ -3205,6 +3251,11 @@ function computeCombinedAvgRate(metal){
             const agg = _plAgg(D.rows, r => isI ? r.name : (r.supplier || 'No supplier')).sort((a, b) => b.profit - a.profit);
             h += `<div style="${_cardCss} padding:4px 12px;"><div style="display:grid; grid-template-columns:1.6fr 1fr 1fr; gap:6px; font-size:10px; font-weight:700; color:var(--text2); text-transform:uppercase; padding:8px 0;"><span>${isI ? 'Item' : 'Supplier'}</span><span style="text-align:right;">Sold</span><span style="text-align:right;">Profit</span></div>` +
                 (agg.map(a => `<div style="display:grid; grid-template-columns:1.6fr 1fr 1fr; gap:6px; font-size:13px; padding:9px 0; border-top:1px solid var(--border);"><span style="min-width:0; overflow-wrap:anywhere;">${_rpEsc(a.label)}<div style="font-size:10.5px; color:var(--text2);">${a.n} pcs · ${a.nw.toFixed(1)} g</div></span><span style="text-align:right;">${_rpFmt(a.rev)}</span><span style="text-align:right; font-weight:800; color:${_plCol(a.profit)};">${_rpFmt(a.profit)}<div style="font-size:10.5px; font-weight:600; color:var(--text2);">${_plPct(a.profit, a.rev)}</div></span></div>`).join('') || '<div class="note" style="padding:10px 0;">Nothing in this range.</div>') + '</div>';
+            // lines with no cost yet (loose items, tags without cost) - sold but not in profit
+            const nm = {};
+            D.noCost.forEach(r => { const k = isI ? r.name : (r.supplier || 'No supplier'); const a = nm[k] = nm[k] || { label: k, n: 0, nw: 0, rev: 0, lk: r.loose ? _plFbKey(r.lk) : '', ln: r.loose ? r.lname : '' }; a.n++; a.nw += r.nw; a.rev += r.rev; });
+            const nl = Object.values(nm).sort((a, b) => b.rev - a.rev);
+            if (nl.length) h += `<div style="${_cardCss} padding:4px 12px; background:#FFF8E1;"><div style="${_hdCss} padding-top:10px;">Sold, no cost entered (not in profit)</div>` + nl.map(a => `<div ${a.lk ? `onclick="plCostOpenLoose('${_rpEnc(a.lk)}', null, '${_rpEnc(a.ln)}')"` : ''} style="display:grid; grid-template-columns:1.6fr 1fr 1fr; gap:6px; font-size:13px; padding:9px 0; border-top:1px solid var(--border); ${a.lk ? 'cursor:pointer;' : ''}"><span style="min-width:0; overflow-wrap:anywhere;">${_rpEsc(a.label)}<div style="font-size:10.5px; color:var(--text2);">${a.n} pcs · ${a.nw.toFixed(1)} g</div></span><span style="text-align:right;">${_rpFmt(a.rev)}</span><span style="text-align:right; font-size:11px; font-weight:700; color:#B26A00;">${a.lk ? '+ add cost' : 'no cost'}</span></div>`).join('') + `</div>`;
         }
 
         if (_plView === 'exp') {
@@ -3216,9 +3267,136 @@ function computeCombinedAvgRate(metal){
         body.innerHTML = h;
     }
 
+    // ── Manual cost dialog (tag or loose item with no cost on the Tag Generator) ──
+    // Same inputs as the Tag Generator: Tunch, P/wstg, Labour per g / per pc, or a direct cost.
+    // Saved in PM-owned nodes (pmMeta/costTags, pmMeta/costLoose); the Tag Generator's own tags are never touched.
+    let _plCd = null;
+    function _plRecSummary(r){
+        if (!r) return '';
+        if (_plNum(r.dcost) > 0) return '₹' + _plNum(r.dcost) + ' total';
+        if (_plNum(r.prate) > 0) return '₹' + _plNum(r.prate) + '/g';
+        if (_plNum(r.ppc) > 0) return '₹' + _plNum(r.ppc) + '/pc';
+        const lab = _plNum(r.lpc) > 0 ? ' + ₹' + _plNum(r.lpc) + '/pc' : _plNum(r.lab) > 0 ? ' + ₹' + _plNum(r.lab) + '/g' : '';
+        return 'tunch ' + _plNum(r.tunch) + (_plNum(r.pw) ? ' + ' + _plNum(r.pw) + ' wstg' : '') + lab;
+    }
+    function plCostOpen(enc){
+        const r = _plRowMap[decodeURIComponent(enc)]; if (!r) return;
+        if (r.loose) return plCostOpenLoose(_rpEnc(_plFbKey(r.lk)), r);
+        _plCd = { kind: 'tag', key: r.tag, fb: _plFbKey(r.tag), row: r, rec: pmCostTags[_plFbKey(r.tag)] || null };
+        _plCostRender();
+    }
+    function plCostOpenLoose(enc, row, nameEnc){
+        const fb = decodeURIComponent(enc || '');
+        const rec = fb ? (pmCostLoose[fb] || null) : null;
+        const nmIn = nameEnc ? decodeURIComponent(nameEnc) : '';
+        _plCd = { kind: 'loose', key: row ? row.lk : (rec ? (rec.name || '').toLowerCase() : nmIn.toLowerCase()), fb, row: row || null, rec, name: row ? row.lname : (rec ? rec.name : nmIn) };
+        _plCostRender();
+    }
+    function _plCostRender(){
+        const c = _plCd, rec = c.rec || {};
+        const mode = (_plNum(rec.dcost) > 0 || _plNum(rec.prate) > 0 || _plNum(rec.ppc) > 0) ? 'direct' : 'tunch';
+        const dunit = _plNum(rec.prate) > 0 ? 'prate' : _plNum(rec.ppc) > 0 ? 'ppc' : 'dcost';
+        const dval = _plNum(rec.prate) || _plNum(rec.ppc) || _plNum(rec.dcost) || '';
+        const lunit = _plNum(rec.lpc) > 0 ? 'lpc' : 'lab', lval = _plNum(rec.lpc) || _plNum(rec.lab) || '';
+        const inp = 'width:100%; margin:0; box-sizing:border-box;';
+        const lbl = 'font-size:11px; display:block; margin-bottom:3px; color:var(--text2);';
+        const r = c.row;
+        let title, info = '';
+        if (c.kind === 'tag') { title = 'Cost of tag ' + _rpEsc(c.key); }
+        else { title = 'Loose / preset cost'; }
+        if (r) info = `<div style="font-size:12px; color:var(--text2); margin-bottom:10px;">${_rpEsc(r.name)} · ${r.nw.toFixed(3)} g · sold ${_rpFmt(r.rev)} incl. GST</div>`;
+        let target = '';
+        if (c.kind === 'loose') {
+            const names = []; const seen = {};
+            const add = n => { n = String(n || '').trim(); if (n && !seen[n.toLowerCase()]) { seen[n.toLowerCase()] = 1; names.push(n); } };
+            add(c.name); (posPresets || []).forEach(p => add(p.name));
+            target = `<label style="${lbl}">Applies to every loose sale of</label><select id="plc-name" style="${inp} margin-bottom:10px;">${names.map(n => `<option value="${_rpEsc(n)}" ${n.toLowerCase() === String(c.name || '').toLowerCase() ? 'selected' : ''}>${_rpEsc(n)}</option>`).join('')}</select>`;
+        }
+        document.getElementById('pl-cost-panel').innerHTML = `
+            <div style="position:sticky; top:0; background:white; padding:18px 0 8px; display:flex; justify-content:space-between; align-items:center;"><h3 style="margin:0; font-size:17px;">${title}</h3><button onclick="plCostClose()" style="width:34px; height:34px; margin:0; padding:0; border:none; border-radius:50%; background:#eee; color:#333; font-weight:800; box-shadow:none;">✕</button></div>
+            ${info}${target}
+            <div style="display:flex; gap:6px; margin-bottom:10px;">
+                <button id="plc-m-tunch" onclick="plCostMode('tunch')" style="flex:1; margin:0; padding:8px 4px; font-size:12px; font-weight:700; border-radius:8px; box-shadow:none;">Tunch + Wstg + Labour</button>
+                <button id="plc-m-direct" onclick="plCostMode('direct')" style="flex:1; margin:0; padding:8px 4px; font-size:12px; font-weight:700; border-radius:8px; box-shadow:none;">Direct cost</button>
+            </div>
+            <div id="plc-tunch">
+                <div style="display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; margin-bottom:8px;">
+                    <div><label style="${lbl}">Tunch %</label><input id="plc-tunch-v" inputmode="decimal" value="${_plNum(rec.tunch) || ''}" oninput="plCostPrev()" style="${inp}"></div>
+                    <div><label style="${lbl}">Wstg % (P/wstg)</label><input id="plc-pw" inputmode="decimal" value="${_plNum(rec.pw) || ''}" oninput="plCostPrev()" style="${inp}"></div>
+                </div>
+                <label style="${lbl}">Labour</label>
+                <div style="display:flex; gap:8px; margin-bottom:8px;"><select id="plc-lunit" onchange="plCostPrev()" style="flex:1; margin:0;"><option value="lab" ${lunit === 'lab' ? 'selected' : ''}>₹ per gram</option><option value="lpc" ${lunit === 'lpc' ? 'selected' : ''}>₹ per piece</option></select><input id="plc-lval" inputmode="decimal" value="${lval}" oninput="plCostPrev()" style="flex:1; margin:0;"></div>
+            </div>
+            <div id="plc-direct" style="display:none;">
+                <label style="${lbl}">Direct cost</label>
+                <div style="display:flex; gap:8px; margin-bottom:8px;"><select id="plc-dunit" onchange="plCostPrev()" style="flex:1; margin:0;"><option value="dcost" ${dunit === 'dcost' ? 'selected' : ''}>₹ total for the piece</option><option value="prate" ${dunit === 'prate' ? 'selected' : ''}>₹ per gram</option><option value="ppc" ${dunit === 'ppc' ? 'selected' : ''}>₹ per piece</option></select><input id="plc-dval" inputmode="decimal" value="${dval}" oninput="plCostPrev()" style="flex:1; margin:0;"></div>
+            </div>
+            <div id="plc-prev" style="font-size:12px; line-height:1.6; margin:4px 0 12px; color:var(--text2);"></div>
+            <div style="display:flex; gap:8px;">${c.rec ? `<button onclick="plCostDelete()" style="flex:1; margin:0; padding:12px; background:#eee; color:#C62828; border:none; border-radius:10px; font-weight:700; box-shadow:none;">Remove</button>` : ''}<button onclick="plCostSave()" style="flex:2; margin:0; padding:12px; background:var(--gold); color:white; border:none; border-radius:10px; font-weight:700;">Save</button></div>`;
+        document.getElementById('pl-cost-modal').style.display = 'flex';
+        plCostMode(mode);
+    }
+    function plCostMode(m){
+        _plCd.mode = m;
+        document.getElementById('plc-tunch').style.display = m === 'tunch' ? '' : 'none';
+        document.getElementById('plc-direct').style.display = m === 'direct' ? '' : 'none';
+        [['tunch', 'plc-m-tunch'], ['direct', 'plc-m-direct']].forEach(([k, id]) => {
+            const b = document.getElementById(id), on = k === m;
+            b.style.background = on ? 'var(--gold)' : 'white'; b.style.color = on ? '#fff' : 'var(--text)'; b.style.border = '1.5px solid ' + (on ? 'var(--gold)' : 'var(--border)');
+        });
+        plCostPrev();
+    }
+    function _plCostRead(){
+        const g = id => { const e = document.getElementById(id); return e ? _plNum(e.value) : 0; };
+        const rec = {};
+        if (_plCd.mode === 'direct') { rec[document.getElementById('plc-dunit').value] = g('plc-dval'); }
+        else { rec.tunch = g('plc-tunch-v'); rec.pw = g('plc-pw'); rec[document.getElementById('plc-lunit').value] = g('plc-lval'); }
+        return rec;
+    }
+    function plCostPrev(){
+        const el = document.getElementById('plc-prev'), r = _plCd && _plCd.row; if (!el) return;
+        if (!r) { el.textContent = ''; return; }
+        const rec = _plCostRead(), c = _plCost(r.item, _plManualTag(rec, r.item), r.ts);
+        if (!c) { el.textContent = 'Enter a cost to see the profit on this piece.'; return; }
+        const pr = r.rev - c.cost;
+        el.innerHTML = `Cost ${_rpFmt(c.cost)} (${_rpEsc(c.basis)}) · Profit <b style="color:${_plCol(pr)};">${_rpFmt(pr)}</b> on this piece`;
+    }
+    function plCostClose(){ document.getElementById('pl-cost-modal').style.display = 'none'; _plCd = null; }
+    function _plCostGuard(){
+        if (_pmAv.active) { showCustomAlert('The archive viewer is read-only. Exit the viewer first.'); return false; }
+        if (!window._writeAllowed) { showCustomAlert('Writes are disabled — this copy is running in read-only mode.'); return false; }
+        return true;
+    }
+    async function plCostSave(){
+        if (!_plCostGuard()) return;
+        const rec = _plCostRead();
+        if (!Object.values(rec).some(v => v > 0)) { showCustomAlert('Enter a tunch or a cost first.'); return; }
+        if (_plCd.mode === 'tunch' && !(rec.tunch > 0) ) { showCustomAlert('Tunch is needed for this option. Use Direct cost if you only know the rupee cost.'); return; }
+        rec.at = Date.now();
+        try {
+            if (_plCd.kind === 'tag') {
+                await window.dbUpdate(window.dbRef(window.firebaseDB, 'pmMeta/costTags'), { [_plCd.fb]: Object.assign({ tag: _plCd.key }, rec) });
+            } else {
+                const nm = (document.getElementById('plc-name').value || '').trim();
+                if (!nm) { showCustomAlert('Pick the item or preset this cost is for.'); return; }
+                const upd = { [_plFbKey(nm.toLowerCase())]: Object.assign({ name: nm }, rec) };
+                if (_plCd.fb && _plCd.fb !== _plFbKey(nm.toLowerCase())) upd[_plCd.fb] = null;   // renamed to another preset
+                await window.dbUpdate(window.dbRef(window.firebaseDB, 'pmMeta/costLoose'), upd);
+            }
+            plCostClose();
+        } catch (e) { console.error('[PlCost] save failed', e); showCustomAlert('Could not save — try again.'); }
+    }
+    async function plCostDelete(){
+        if (!_plCostGuard() || !_plCd) return;
+        try {
+            await window.dbUpdate(window.dbRef(window.firebaseDB, _plCd.kind === 'tag' ? 'pmMeta/costTags' : 'pmMeta/costLoose'), { [_plCd.fb]: null });
+            plCostClose();
+        } catch (e) { console.error('[PlCost] delete failed', e); showCustomAlert('Could not remove — try again.'); }
+    }
+
     function plCsv(){
         const D = plCompute(_plRange.from, _plRange.to), q = (v) => '"' + String(v == null ? '' : v).replace(/"/g, '""') + '"';
-        const lines = ['Date,Tag,Item,Supplier,Net wt,Sold (excl GST),Metal cost,Making/labour,Cost,Profit,Margin %,Note'];
+        const lines = ['Date,Tag,Item,Supplier,Net wt,Sold (incl GST),Metal cost,Making/labour,Cost,Profit,Margin %,Note'];
         D.rows.forEach(r => lines.push([r.day, r.tag, q(r.name), q(r.supplier), r.nw.toFixed(3), r.rev.toFixed(2), r.metal.toFixed(2), r.making.toFixed(2), r.cost.toFixed(2), r.profit.toFixed(2), r.margin.toFixed(1), q(r.basis)].join(',')));
         D.noCost.forEach(r => lines.push([r.day, r.tag, q(r.name), q(r.supplier), r.nw.toFixed(3), r.rev.toFixed(2), '', '', '', '', '', q('NO COST: ' + r.why)].join(',')));
         _rpDownload('pnl_' + _plRange.from + '_to_' + _plRange.to + '.csv', lines.join('\n'), 'text/csv');
