@@ -3098,9 +3098,9 @@ function computeCombinedAvgRate(metal){
         if (_plNum(tag.dcost) > 0) return { cost: _plNum(tag.dcost), metal: 0, making: _plNum(tag.dcost), fine: 0, basis: 'direct cost' };   // manual: total rupees for the piece
         if (!(tunch > 0)) return null;   // no tunch = no pure-metal cost to value
         const mw = getInvoiceItemPureGrams(item);
-        const metalKey = mw ? mw.metal.toLowerCase() : String(item.metal || tag.cat || '').toLowerCase().includes('gold') ? 'gold' : 'silver';
+        const metalKey = tag.mmetal ? String(tag.mmetal).toLowerCase() : mw ? mw.metal.toLowerCase() : String(item.metal || tag.cat || '').toLowerCase().includes('gold') ? 'gold' : 'silver';
         let pureRate = _plNum(item.pureRate);
-        if (!(pureRate > 0)) { const r = _plNum(item.rate), ratio = _purityRatio(metalKey, item.stamp || tag.stamp || ''); pureRate = (r > 0 && ratio > 0) ? r / ratio : 0; }
+        if (!(pureRate > 0)) { const r = _plNum(item.rate), ratio = _purityRatio(metalKey, tag.mstamp || item.stamp || tag.stamp || ''); pureRate = (r > 0 && ratio > 0) ? r / ratio : 0; }
         if (!(pureRate > 0)) pureRate = getPureRate(metalKey);
         if (!(pureRate > 0)) return null;
         const fine = nw * (tunch + pw) / 100;
@@ -3121,6 +3121,8 @@ function computeCombinedAvgRate(metal){
         if (_plNum(rec.prate) > 0) o.prate = _plNum(rec.prate);
         if (_plNum(rec.ppc) > 0) o.ppc = _plNum(rec.ppc);
         if (_plNum(rec.dcost) > 0) o.dcost = _plNum(rec.dcost);
+        if (rec.stamp) o.mstamp = rec.stamp;   // manual stamp / metal (old entries with none recorded)
+        if (rec.metal) o.mmetal = rec.metal;
         return o;
     }
 
@@ -3329,6 +3331,10 @@ function computeCombinedAvgRate(metal){
                     <div><label style="${lbl}">Tunch %</label><input id="plc-tunch-v" inputmode="decimal" value="${_plNum(rec.tunch) || ''}" oninput="plCostPrev()" style="${inp}"></div>
                     <div><label style="${lbl}">Wstg % (P/wstg)</label><input id="plc-pw" inputmode="decimal" value="${_plNum(rec.pw) || ''}" oninput="plCostPrev()" style="${inp}"></div>
                 </div>
+                <div style="display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; margin-bottom:8px;">
+                    <div><label style="${lbl}">Metal</label><select id="plc-metal" onchange="plCostStamps(); plCostPrev()" style="${inp}"><option value="">Auto</option><option value="gold" ${rec.metal === 'gold' ? 'selected' : ''}>Gold</option><option value="silver" ${rec.metal === 'silver' ? 'selected' : ''}>Silver</option></select></div>
+                    <div><label style="${lbl}">Stamp</label><select id="plc-stamp" onchange="plCostPrev()" style="${inp}"></select></div>
+                </div>
                 <label style="${lbl}">Labour</label>
                 <div style="display:flex; gap:8px; margin-bottom:8px;"><select id="plc-lunit" onchange="plCostPrev()" style="flex:1; margin:0;"><option value="lab" ${lunit === 'lab' ? 'selected' : ''}>₹ per gram</option><option value="lpc" ${lunit === 'lpc' ? 'selected' : ''}>₹ per piece</option></select><input id="plc-lval" inputmode="decimal" value="${lval}" oninput="plCostPrev()" style="flex:1; margin:0;"></div>
             </div>
@@ -3339,7 +3345,14 @@ function computeCombinedAvgRate(metal){
             <div id="plc-prev" style="font-size:12px; line-height:1.6; margin:4px 0 12px; color:var(--text2);"></div>
             <div style="display:flex; gap:8px;">${c.rec ? `<button onclick="plCostDelete()" style="flex:1; margin:0; padding:12px; background:#eee; color:#C62828; border:none; border-radius:10px; font-weight:700; box-shadow:none;">Remove</button>` : ''}<button onclick="plCostSave()" style="flex:2; margin:0; padding:12px; background:var(--gold); color:white; border:none; border-radius:10px; font-weight:700;">Save</button></div>`;
         document.getElementById('pl-cost-modal').style.display = 'flex';
+        plCostStamps(rec.stamp || '');
         plCostMode(mode);
+    }
+    function plCostStamps(sel){
+        const m = document.getElementById('plc-metal'), e = document.getElementById('plc-stamp'); if (!m || !e) return;
+        const keep = sel !== undefined && typeof sel === 'string' ? sel : e.value;
+        const set = {}; (m.value ? [m.value] : ['gold', 'silver']).forEach(k => Object.keys((rates && rates[k]) || {}).forEach(x => set[x] = 1));
+        e.innerHTML = '<option value="">Auto</option>' + Object.keys(set).map(x => `<option value="${_rpEsc(x)}" ${x === keep ? 'selected' : ''}>${_rpEsc(x)}</option>`).join('');
     }
     function plCostMode(m){
         _plCd.mode = m;
@@ -3355,7 +3368,7 @@ function computeCombinedAvgRate(metal){
         const g = id => { const e = document.getElementById(id); return e ? _plNum(e.value) : 0; };
         const rec = {};
         if (_plCd.mode === 'direct') { rec[document.getElementById('plc-dunit').value] = g('plc-dval'); }
-        else { rec.tunch = g('plc-tunch-v'); rec.pw = g('plc-pw'); rec[document.getElementById('plc-lunit').value] = g('plc-lval'); }
+        else { rec.tunch = g('plc-tunch-v'); rec.pw = g('plc-pw'); rec[document.getElementById('plc-lunit').value] = g('plc-lval'); rec.metal = document.getElementById('plc-metal').value; rec.stamp = document.getElementById('plc-stamp').value; }
         return rec;
     }
     function plCostPrev(){
