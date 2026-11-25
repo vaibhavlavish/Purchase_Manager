@@ -915,6 +915,9 @@
 
     // Firebase keys cannot contain . $ # [ ] / — encode them so stamps like "92.5" are safe
     function _pmPurKey(stamp){ return String(stamp).replace(/[.$#\[\]\/%]/g, c => '%' + c.charCodeAt(0).toString(16).toUpperCase().padStart(2, '0')); }
+    // Old invoices/tags still carry renamed stamps — map them to the current name so sales group together
+    const _PM_STAMP_ALIAS = { 'S92': 'S925' };
+    function _normStamp(st){ const k = String(st == null ? '' : st).trim(); return _PM_STAMP_ALIAS[k.toUpperCase()] || k; }
     function _pmPurityPct(metalKey, stamp){
         const o = pmPurity && pmPurity[metalKey];
         const v = o && o[_pmPurKey(stamp)];
@@ -928,6 +931,7 @@
         return stampRate / pureRate;
     }
     function _purityRatio(metal, stamp){
+        stamp = _normStamp(stamp);
         if (!metal || !stamp) return 1;
         const metalKey = String(metal).toLowerCase();
         const ov = _pmPurityPct(metalKey, stamp);
@@ -1024,7 +1028,7 @@
         }
         const metal = _normMetal(rawMetal);
         if (metal !== 'Gold' && metal !== 'Silver') return null;
-        const stamp = item.stamp || (item.barcode && productData[item.barcode] && productData[item.barcode].stamp) || '';
+        const stamp = _normStamp(item.stamp || (item.barcode && productData[item.barcode] && productData[item.barcode].stamp) || '');
         const rawWeight = item.nlWt || 0;
         return { metal, weight: rawWeight * _purityRatio(metal, stamp) };
     }
@@ -1492,9 +1496,9 @@ function computeCombinedAvgRate(metal){
                 let name = String(it.itemName || pd.itemName || it.desc || '').trim(); if (!name) return;
                 name = _pmItemName(it, name);
                 const pcs = it.pc || 1, wt = it.nlWt || 0, age = (now - t) / D;
-                const gk0 = gkOf(mw.metal, it.stamp || pd.stamp, name);
+                const gk0 = gkOf(mw.metal, _normStamp(it.stamp || pd.stamp), name);
                 if (inWin(t)) {
-                    const c = mk(mw.metal, it.stamp || pd.stamp, name);
+                    const c = mk(mw.metal, _normStamp(it.stamp || pd.stamp), name);
                     c.sold90 += pcs; c.g90 += wt; if (t >= W.e - 30 * D) c.sold30 += pcs;
                     c.sl.push({ w: wt / pcs, s: nz(it.size || pd.size), d: nz(it.design || pd.design), n: pcs, td: it.tagDate || pd.tagDate || '' });   // sold piece (per-piece net weight)
                     const tdMs = it.tagDate ? new Date(it.tagDate).getTime() : 0;   // saved on the invoice line at sale time
@@ -1524,7 +1528,7 @@ function computeCombinedAvgRate(metal){
             if (iss.has(bc)) return;
             const td = p._ts || (p.tagDate ? new Date(p.tagDate).getTime() : 0);   // Tag Generator tags carry the exact creation time
             const sold = lastSale[bc] && !ret.has(bc) && (!td || td <= lastSale[bc]);   // sold (and not a reused number)
-            const c = mk(metal, p.stamp, name);
+            const c = mk(metal, _normStamp(p.stamp), name);
             const sp = tgTags && tgTags[bc] ? String(tgTags[bc].supplier || '').trim() : ''; if (sp) c.sup[sp] = (c.sup[sp] || 0) + 1;   // usual supplier = most common one on this item's tags
             c.ev.push([td || -1e18, 1]); if (sold) c.ev.push([lastSale[bc], -1]);   // stock timeline: tag made (+1) / sold (-1)
             if (sold) { if (td && !batchSeen[bc] && (now - td) / D <= 90) { c.bSold++; c.bFirst = c.bFirst ? Math.min(c.bFirst, td) : td; } return; }   // older invoices have no tagDate: use the tag still listed
@@ -4174,9 +4178,9 @@ function computeCombinedAvgRate(metal){
                 // One weight for every figure on this page (item list, stamp headers, tag rows, best sellers):
                 // Fine → pure metal (net × stamp purity); Weight → the item's own net weight.
                 const _itemW = (_salesWtMode === 'fine' && mw) ? mw.weight : (item.nlWt || 0);
-                const stamp = item.stamp
+                const stamp = _normStamp(item.stamp
                     || (item.barcode && productData[item.barcode] && productData[item.barcode].stamp)
-                    || '';
+                    || '');
                 if (mw) {
                     grams[mw.metal] += mw.weight;
                     const stampKey = stamp || 'Unstamped';
@@ -4191,7 +4195,7 @@ function computeCombinedAvgRate(metal){
                     || (item.desc || 'Unnamed Item').trim());
                 // Custom items get their own section in the item-wise list (not "Other")
                 const isCustom = !!item.isCustom;
-                const key = isCustom ? ('custom|' + _ciCat(item) + '|' + actualName) : (metal + '|' + stamp + '|' + actualName);
+                const key = isCustom ? ('custom|' + _ciCat(item) + '|' + actualName.replace(/\s+/g, ' ').trim().toUpperCase()) : (metal + '|' + stamp + '|' + actualName.replace(/\s+/g, ' ').trim().toUpperCase());
                 if (!itemStats[key]) itemStats[key] = { key: key, name: actualName, metal: isCustom ? '' : metal, stamp: isCustom ? '' : stamp, custom: isCustom, cat: isCustom ? _ciCat(item) : '', qty: 0, weight: 0, value: 0, tags: [] };
                 const _pd = (item.barcode && productData[item.barcode]) || {};
                 itemStats[key].tags.push({
