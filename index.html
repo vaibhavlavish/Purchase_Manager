@@ -1621,7 +1621,11 @@ function computeCombinedAvgRate(metal){
     }
     // Tap a tile -> which sizes / designs / size x design sell, against what is in stock
     let _bhPopKey = '', _bhPopMode = 's', _bhPopStep = 0;
-    function _bhOpen(enc) { _bhPopKey = decodeURIComponent(enc); _bhPopMode = 's'; _bhPopStep = 0; _bhPopRender(); }
+    function _bhOpen(enc, alarm) {
+        _bhPopKey = decodeURIComponent(enc); _bhPopMode = 's'; _bhPopStep = 0;
+        const al = alarm && buyAlarm[_bhPopKey]; if (al && al.m) { _bhPopMode = al.m; _bhPopStep = al.st > 0 ? al.st : 0; }   // jump straight to the alarm's view
+        _bhPopRender();
+    }
     function _bhPopSet(m) { _bhPopMode = m; _bhPopRender(); }
     async function _bhMetaSet(path, key, val, store) {
         const loc = store || buyCover;
@@ -1741,12 +1745,12 @@ function computeCombinedAvgRate(metal){
             <div class="bh-big" style="color:${col(r.cover)}">Buy ${r.need}</div>
             <div class="bh-sub">${r.avgW > 0 ? '≈ ' + (r.need * r.avgW).toFixed(0) + ' g · ' : ''}have ${r.stock} · ${covTxt(r.cover)} left</div>
             ${chipsOf(r)}</div>`;
-        const covTile = r => `<div class="bh-tile" style="--c:${col(r.eff)};cursor:pointer;" title="${tip(r)}" onclick="_bhOpen('${key(r)}')">
+        const covTile = r => `<div class="bh-tile" style="--c:${col(r.eff)};cursor:pointer;" title="${tip(r)}" onclick="_bhOpen('${key(r)}', ${r.low ? 'true' : 'false'})">
             <button class="bh-x" onclick="event.stopPropagation();_bhHide('${key(r)}', true)" title="Hide">✕</button>
             <div class="bh-name">${E(r.name)}${stamp(r)}</div>
             <div class="bh-big" style="color:${col(r.eff)}">${covTxt(r.eff)}</div>
             <div class="bh-bar"><i style="width:${Math.max(4, Math.min(100, (r.eff === Infinity ? 180 : r.eff) / 180 * 100))}%"></i></div>
-            <div class="bh-sub">${r.stock} left · ${r.rate.toFixed(2)}/day</div>${r.low ? `<div class="bh-chip" style="color:#D32F2F;border-color:#D32F2F;" title="Item as a whole: ${covTxt(r.cover)} left">⚠ ${E(r.low.label)} · ${r.low.stock} left</div>` : ''}${chipsOf(r)}</div>`;
+            <div class="bh-sub">${r.stock} left · ${r.rate.toFixed(2)}/day</div>${r.low ? `<div class="bh-chip" style="color:#D32F2F;border-color:#D32F2F;cursor:pointer;" onclick="event.stopPropagation();_bhOpen('${key(r)}', true)" title="Item as a whole: ${covTxt(r.cover)} left">⚠ ${E(r.low.label)} · ${r.low.stock} left</div>` : ''}${chipsOf(r)}</div>`;
         const mini = (l, r) => `<div class="bh-mini"><span>${l}</span><span>${r}</span></div>`;
         const seg = m => `<button onclick="_bhSetMetal('${m}')" class="bh-seg${_bhMetal === m ? ' on' : ''}">${m === 'Gold' ? '🟡' : '⚪'} ${m}</button>`;
         const num = (lbl, val, step, fn) => `<label class="bh-num">${lbl}<input type="number" min="0.1" step="${step}" value="${val}" onchange="${fn}"></label>`;
