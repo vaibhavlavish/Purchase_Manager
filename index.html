@@ -748,6 +748,7 @@
     let invItemSettings = {};   // POS item settings (read-only): stock item name -> { printName, hsn }
     let itemAliases = {};   // hand-made 'treat these names as one': KEY(from) -> { from, to } (pmMeta/itemAliases)
     let buyCover = {};   // per-item cover-days override (pmMeta/buyCover)
+    let buyAlarm = {};   // per-item group alarm: { m: view mode, st: weight bucket } (pmMeta/buyAlarm)
     let buyHidden = {};   // Purchase helper rows the user hid (pmMeta/buyHidden, shared across devices)
     let presetStock = {};   // POS manual stock counts for loose presets (read-only): lowercase preset name -> { available }
     let returnedBarcodes = {}, issuedBarcodes = {};   // tags returned to stock / issued out of stock (read-only, set by the POS)
@@ -811,6 +812,7 @@
             _pmRerenderSoon();
         }, err => console.error('[ItemAliases] read error', err));
 
+        window.dbOnValue(window.dbRef(window.firebaseDB, 'pmMeta/buyAlarm'), snap => { buyAlarm = snap.val() || {}; _pmRerenderSoon(); }, err => console.error('[BuyAlarm] read error', err));
         window.dbOnValue(window.dbRef(window.firebaseDB, 'pmMeta/buyCover'), snap => { buyCover = snap.val() || {}; _pmRerenderSoon(); }, err => console.error('[BuyCover] read error', err));
 
         window.dbOnValue(window.dbRef(window.firebaseDB, 'pmMeta/buyHidden'), snap => {
@@ -1559,6 +1561,32 @@ function computeCombinedAvgRate(metal){
         if (E > p && cnt <= 0) z += E - p;
         return z / 86400000;
     }
+    // Weakest size / design / design x weight group of an item (days of stock left), so one nearly-empty group can pull a well-stocked item up the list
+    function _bhGroupLow(r, W) {
+        const al = buyAlarm[r.key];   // only the view the user chose as this item's alarm (e.g. rings: Size, chains: Design × Wt 10 g)
+        if (!al || !al.m || !r.sl || !r.tl || !(r.sold90 >= 2)) return null;
+        const ws = r.sl.concat(r.tl).map(x => x.w).filter(w => w > 0), range = ws.length ? Math.max.apply(null, ws) - Math.min.apply(null, ws) : 0;
+        const step = al.st > 0 ? al.st : ([0.1, 0.2, 0.25, 0.5, 1, 2, 2.5, 5, 10, 20, 25, 50, 100, 200].find(n => n >= range / 6) || 200), fmt = x => String(parseFloat(x.toFixed(2)));
+        const dims = al.m, hasW = dims.includes('w');
+        const keyOf = x => {
+            const parts = [];
+            if (dims.includes('s')) { if (!x.s) return null; parts.push('Size ' + x.s); }
+            if (dims.includes('d')) { if (!x.d) return null; parts.push(x.d); }
+            if (hasW) { if (!(x.w > 0)) return null; const lo = Math.floor(x.w / step + 1e-9) * step; parts.push(fmt(lo) + '–' + fmt(lo + step) + ' g'); }
+            return parts.join(' · ');
+        };
+        const map = {}; let tot = 0, worst = null;
+        r.sl.forEach(x => { const k = keyOf(x); if (k) { (map[k] = map[k] || { sold: 0, stock: 0 }).sold += x.n; tot += x.n; } });
+        r.tl.forEach(x => { const k = keyOf(x); if (k) (map[k] = map[k] || { sold: 0, stock: 0 }).stock++; });
+        if (!tot) return null;
+        const scale = Math.max(1, r.sold90 / tot);
+        Object.keys(map).forEach(k => {
+            const e = map[k]; if (e.sold < 2) return;
+            const rate = e.sold / (r.effDays || W.days) * r.mult * scale, cv = e.stock / rate;
+            if (!worst || cv < worst.cv) worst = { label: k, cv, sold: e.sold, stock: e.stock };
+        });
+        return worst;
+    }
     function _bhRowsFor() {
         const { cat, idx, loose, W } = _bhCompute();
         const Hm = _bhDaysFor(_bhMetal), mult = idx[_bhMetal] * _bhBoost;
@@ -1576,7 +1604,11 @@ function computeCombinedAvgRate(metal){
             const need = Math.max(out ? 1 : 0, Math.ceil(rate * H * bm - have));
             const cover = rate > 0 ? have / rate : Infinity;
             const avgW = (c.sold90 && c.g90 > 0) ? c.g90 / c.sold90 : (c.stock ? c.stockG / c.stock : 0);
-            return Object.assign(c, { rate, need, cover, avgW, H, out, bm, notes, mult: m2, effDays: c.inDays || W.days });
+            Object.assign(c, { rate, need, cover, avgW, H, out, bm, notes, mult: m2, effDays: c.inDays || W.days });
+            const gl = _bhGroupLow(c, W);
+            c.low = gl && gl.cv < 30 && gl.cv < cover ? gl : null;   // a group is nearly out while the item as a whole looks fine
+            c.eff = c.low ? c.low.cv : cover;
+            return c;
         });
         // loose (untagged) items that match a POS preset: learn their demand; stock comes from the POS preset counter when it tracks one
         const pn = {}; (posPresets || []).forEach(p => { pn[String(p.name || '').trim().toLowerCase()] = p; });
@@ -1591,13 +1623,15 @@ function computeCombinedAvgRate(metal){
     let _bhPopKey = '', _bhPopMode = 's', _bhPopStep = 0;
     function _bhOpen(enc) { _bhPopKey = decodeURIComponent(enc); _bhPopMode = 's'; _bhPopStep = 0; _bhPopRender(); }
     function _bhPopSet(m) { _bhPopMode = m; _bhPopRender(); }
-    async function _bhMetaSet(path, key, val) {
-        const loc = buyCover;
+    async function _bhMetaSet(path, key, val, store) {
+        const loc = store || buyCover;
         if (val == null) delete loc[key]; else loc[key] = val;
         renderBuyHelper(true); _bhPopRender();
         try { await window.dbUpdate(window.dbRef(window.firebaseDB, path), { [key]: val == null ? null : val }); }
         catch (e) { console.error(e); invToast('Could not save — kept only on this screen'); }
     }
+    function _bhAlarmSet(m, st) { _bhMetaSet('pmMeta/buyAlarm', _bhPopKey, { m, st: st || 0 }, buyAlarm); }
+    function _bhAlarmClear() { _bhMetaSet('pmMeta/buyAlarm', _bhPopKey, null, buyAlarm); }
     function _bhItemCover(v) { v = parseInt(v, 10); _bhMetaSet('pmMeta/buyCover', _bhPopKey, v > 0 ? v : null); }
     function _bhPopStepSet(v) { v = parseFloat(v); _bhPopStep = v > 0 ? v : 0; _bhPopRender(); }
     function _bhPopRender() {
@@ -1626,25 +1660,29 @@ function computeCombinedAvgRate(metal){
         const map = {}; let soldQ = 0, tagQ = 0;
         r.sl.forEach(x => { const q = keyOf(x); if (q) { const e = map[q.k] = map[q.k] || { sold: 0, stock: 0, lo: q.lo }; e.sold += x.n; soldQ += x.n; } });
         r.tl.forEach(x => { const q = keyOf(x); if (q) { const e = map[q.k] = map[q.k] || { sold: 0, stock: 0, lo: q.lo }; e.stock++; tagQ++; } });
+        // Only some sales carry this dimension (e.g. 29 of 49 have design + weight), so scale each group's sales up to the item's full demand
+        const sumSold0 = Object.keys(map).reduce((a, k) => a + map[k].sold, 0), scale = sumSold0 > 0 ? Math.max(1, r.sold90 / sumSold0) : 1;
         const ents = Object.keys(map).map(l => {
-            const e = map[l], rate = e.sold / (r.effDays || W.days) * (r.mult || mult), cv = rate > 0 ? e.stock / rate : Infinity;
-            return { label: l, sold: e.sold, stock: e.stock, lo: e.lo, cv, need: 0, c: (e.sold >= 2 || (e.sold >= 1 && e.stock === 0)) ? col(e.stock === 0 ? 0 : cv) : '#9E9E9E' };
+            const e = map[l], rate = e.sold / (r.effDays || W.days) * (r.mult || mult) * scale, cv = rate > 0 ? e.stock / rate : Infinity;
+            return { label: l, sold: e.sold, stock: e.stock, lo: e.lo, cv, rate, gap: Math.max(0, rate * r.H * (r.bm || 1) - e.stock), need: 0, c: (e.sold >= 2 || (e.sold >= 1 && e.stock === 0)) ? col(e.stock === 0 ? 0 : cv) : '#9E9E9E' };
         }).sort(dims === 'w' ? (a, b) => a.lo - b.lo : (a, b) => b.sold - a.sold || b.stock - a.stock);
-        // Split the ITEM's buy number across sizes/designs, so rows add up to the number on the tile.
-        // Only some sales carry a size, so scale that mix up to the item's full demand, then give each size the
-        // pieces it lacks (target - stock). If nothing lacks, fall back to its share of sales.
+        // Each group is judged on its OWN stock vs its own demand over the cover days, even when the item as a whole is well stocked
+        // (a big surplus in slow groups must not hide a shortage in a fast one). If the item itself needs a buy, rows are at least that total.
         const sumSold = ents.reduce((a, e) => a + e.sold, 0), D = r.rate * r.H * (r.bm || 1);
         const total = (r.sold90 >= 2 || r.out) ? r.need : 0;
+        ents.forEach(e => { if (e.sold >= 2 || (e.sold >= 1 && e.stock === 0)) e.need = Math.ceil(e.gap - 1e-9); });
         if (total > 0 && sumSold > 0) {
-            ents.forEach(e => { e.gap = Math.max(0, D * e.sold / sumSold - e.stock); });
-            const useGap = ents.some(e => e.gap > 0), w = e => useGap ? e.gap : e.sold, tw = ents.reduce((a, e) => a + w(e), 0);
-            ents.forEach(e => { const raw = total * w(e) / tw; e.need = Math.floor(raw); e.frac = raw - e.need; });
             let left = total - ents.reduce((a, e) => a + e.need, 0);
-            ents.filter(e => w(e) > 0).sort((a, b) => b.frac - a.frac).forEach(e => { if (left > 0) { e.need++; left--; } });
+            if (left > 0) {   // item needs more than the groups' own gaps: hand the rest to the groups with most sales
+                const wts = ents.filter(e => e.sold >= 2 || e.stock === 0), tw = wts.reduce((a, e) => a + e.sold, 0);
+                if (tw > 0) { wts.forEach(e => { const x = Math.floor(left * e.sold / tw); e.need += x; }); left = total - ents.reduce((a, e) => a + e.need, 0); wts.sort((a, b) => b.sold - a.sold).forEach(e => { if (left > 0) { e.need++; left--; } }); }
+            }
         }
-        // A size / design / weight group that SOLD but has NOTHING left is always flagged, even when the item as a whole is well stocked
         ents.forEach(e => { if (e.need === 0 && e.stock === 0 && e.sold >= 1 && sumSold > 0) e.need = Math.max(1, Math.ceil(D * e.sold / sumSold)); });
-        const short = ents.filter(e => e.need > 0).sort((a, b) => b.need - a.need).slice(0, 4).map(e => E(e.label));
+        // Most urgent first: groups to buy (least days left first, empty ones on top), then the rest by sales
+        const urg = e => e.stock === 0 && e.sold >= 1 ? 0 : e.cv;
+        ents.sort((a, b) => (b.need > 0) - (a.need > 0) || (a.need > 0 ? urg(a) - urg(b) || b.need - a.need : b.sold - a.sold || b.stock - a.stock));
+        const short = ents.filter(e => e.need > 0).slice(0, 4).map(e => E(e.label));
         const tabs = modes.map(x => `<button onclick="_bhPopSet('${x[0]}')" class="bh-seg${x[0] === m[0] ? ' on' : ''}" style="font-size:11px;padding:7px 2px;">${x[1]}</button>`).join('');
         const row = e => `<div style="display:flex;justify-content:space-between;gap:8px;align-items:center;padding:8px 0 8px 10px;border-top:1px solid var(--border);border-left:4px solid ${e.c};margin-top:2px;">
             <div style="min-width:0;"><div style="font-weight:800;font-size:13px;">${E(e.label)}</div>
@@ -1660,10 +1698,14 @@ function computeCombinedAvgRate(metal){
                 ${buyCover[r.key] ? '<button onclick="_bhItemCover(0)" style="margin:0;width:auto;padding:6px 12px;font-size:12px;box-shadow:none;background:none;color:var(--text2);border:1px solid var(--border);">Default cover</button>' : ''}
             </div>
             <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-bottom:8px;">${tabs}</div>
+            ${(() => { const al = buyAlarm[r.key], same = al && al.m === m[0] && (!hasW || Math.abs((al.st || 0) - step) < 1e-9), mn = al && (modes.find(x => x[0] === al.m) || [])[1];
+                return `<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px;font-size:11px;color:var(--text2);">
+                    ${same ? '' : `<button onclick="_bhAlarmSet('${m[0]}', ${hasW ? step : 0})" style="margin:0;width:auto;padding:6px 12px;font-size:12px;box-shadow:none;background:none;color:var(--text);border:1px solid var(--border);">🔔 ${al ? 'Change alarm to' : 'Set alarm on'} ${E(m[1])}${hasW ? ' · ' + fmt(step) + ' g' : ''}</button>`}
+                    ${al ? `<span>${same ? '🔔 Alarm is on this view' : '🔔 Alarm: ' + E(mn || '') + (al.st ? ' · ' + al.st + ' g' : '')}</span><button onclick="_bhAlarmClear()" style="margin:0;width:auto;padding:5px 10px;font-size:11px;box-shadow:none;background:none;color:var(--text2);border:1px solid var(--border);">Remove</button>` : '<span>No alarm: only the whole item counts for “running low”</span>'}</div>`; })()}
             ${hasW ? `<label style="display:flex;align-items:center;gap:8px;font-size:11px;color:var(--text2);margin-bottom:6px;">Weight bucket (g)<input type="number" min="0.05" step="0.05" value="${fmt(step)}" onchange="_bhPopStepSet(this.value)" style="margin:0;width:90px;padding:5px 8px;font-size:13px;"><span>${_bhPopStep ? '' : 'auto'}</span></label>` : ''}
             ${short.length ? `<div style="font-size:12px;margin-bottom:4px;"><b>Short on:</b> ${short.join(', ')}</div>` : ''}
             <div style="max-height:46vh;overflow:auto;">${ents.length ? ents.slice(0, 40).map(row).join('') : '<div class="note" style="padding:10px 0;">None recorded for this item.</div>'}${ents.length > 40 ? `<div class="note" style="padding:6px 0;">+ ${ents.length - 40} more small groups</div>` : ''}</div>
-            <div style="font-size:10.5px;color:var(--text2);margin-top:6px;">${tagQ} of ${r.stock} tags in stock and ${soldQ} of ${r.sold90} sold pcs have ${m[1].replace(/ × /g, ' + ').toLowerCase()}. ${W.label}. Buy split uses those ${sumSold} sales${sumSold < 8 ? ' (small sample — treat as a hint)' : ''}; rows add up to ${ents.reduce((a, e) => a + e.need, 0)} (groups sold but with none left are always flagged).</div></div>`;
+            <div style="font-size:10.5px;color:var(--text2);margin-top:6px;">${tagQ} of ${r.stock} tags in stock and ${soldQ} of ${r.sold90} sold pcs have ${m[1].replace(/ × /g, ' + ').toLowerCase()}. ${W.label}. Buy split uses those ${sumSold} sales${sumSold < 8 ? ' (small sample — treat as a hint)' : ''}; each row is judged on its own stock vs its own sales over ${r.H} days (groups sold but with none left are always flagged); rows may add up to more than the item total (${ents.reduce((a, e) => a + e.need, 0)}).</div></div>`;
         _pmSetModal(r.name + (r.stamp ? ' ' + r.stamp : ''), h, _pmPopWrap(_pmBtn('Close', 'closePmAlert()', 'ghost')));
     }
 
@@ -1675,8 +1717,8 @@ function computeCombinedAvgRate(metal){
         if (!force && body.contains(document.activeElement) && document.activeElement.tagName === 'INPUT') return;
         const E = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
         const { rows, idx, loose, lrows, H, mult, W } = _bhRowsFor(), dayMs = 86400000;
-        const buy = rows.filter(r => r.need > 0 && (r.sold90 >= 2 || r.out) && !buyHidden[r.key]).sort((a, b) => a.cover - b.cover).slice(0, 40);
-        const cov = rows.filter(r => (r.sold90 >= 2 || r.out) && !buyHidden[r.key]).sort((a, b) => a.cover - b.cover || b.sold90 - a.sold90);
+        const buy = rows.filter(r => r.need > 0 && (r.sold90 >= 2 || r.out) && !buyHidden[r.key]).sort((a, b) => a.eff - b.eff).slice(0, 40);
+        const cov = rows.filter(r => (r.sold90 >= 2 || r.out) && !buyHidden[r.key]).sort((a, b) => a.eff - b.eff || b.sold90 - a.sold90);
         const isPre = l => lrows.some(x => x.name === l.name && x.metal === l.metal);
         const looseRows = loose.filter(l => l.metal === _bhMetal && !isPre(l)).sort((a, b) => b.pcs - a.pcs);
         const preRows = lrows.filter(l => l.metal === _bhMetal && !buyHidden[l.key]).sort((a, b) => (b.need - a.need) || (b.pcs - a.pcs));
@@ -1699,12 +1741,12 @@ function computeCombinedAvgRate(metal){
             <div class="bh-big" style="color:${col(r.cover)}">Buy ${r.need}</div>
             <div class="bh-sub">${r.avgW > 0 ? '≈ ' + (r.need * r.avgW).toFixed(0) + ' g · ' : ''}have ${r.stock} · ${covTxt(r.cover)} left</div>
             ${chipsOf(r)}</div>`;
-        const covTile = r => `<div class="bh-tile" style="--c:${col(r.cover)};cursor:pointer;" title="${tip(r)}" onclick="_bhOpen('${key(r)}')">
+        const covTile = r => `<div class="bh-tile" style="--c:${col(r.eff)};cursor:pointer;" title="${tip(r)}" onclick="_bhOpen('${key(r)}')">
             <button class="bh-x" onclick="event.stopPropagation();_bhHide('${key(r)}', true)" title="Hide">✕</button>
             <div class="bh-name">${E(r.name)}${stamp(r)}</div>
-            <div class="bh-big" style="color:${col(r.cover)}">${covTxt(r.cover)}</div>
-            <div class="bh-bar"><i style="width:${Math.max(4, Math.min(100, (r.cover === Infinity ? 180 : r.cover) / 180 * 100))}%"></i></div>
-            <div class="bh-sub">${r.stock} left · ${r.rate.toFixed(2)}/day</div>${chipsOf(r)}</div>`;
+            <div class="bh-big" style="color:${col(r.eff)}">${covTxt(r.eff)}</div>
+            <div class="bh-bar"><i style="width:${Math.max(4, Math.min(100, (r.eff === Infinity ? 180 : r.eff) / 180 * 100))}%"></i></div>
+            <div class="bh-sub">${r.stock} left · ${r.rate.toFixed(2)}/day</div>${r.low ? `<div class="bh-chip" style="color:#D32F2F;border-color:#D32F2F;" title="Item as a whole: ${covTxt(r.cover)} left">⚠ ${E(r.low.label)} · ${r.low.stock} left</div>` : ''}${chipsOf(r)}</div>`;
         const mini = (l, r) => `<div class="bh-mini"><span>${l}</span><span>${r}</span></div>`;
         const seg = m => `<button onclick="_bhSetMetal('${m}')" class="bh-seg${_bhMetal === m ? ' on' : ''}">${m === 'Gold' ? '🟡' : '⚪'} ${m}</button>`;
         const num = (lbl, val, step, fn) => `<label class="bh-num">${lbl}<input type="number" min="0.1" step="${step}" value="${val}" onchange="${fn}"></label>`;
@@ -1738,7 +1780,7 @@ function computeCombinedAvgRate(metal){
             <div style="display:flex;gap:6px;margin-top:8px;">${[[30, '30 d'], [90, '90 d'], [180, '6 m'], [365, '1 y'], [0, 'Custom']].map(x => `<button class="bh-seg${_bhBack === x[0] ? ' on' : ''}" style="font-size:12px;padding:7px 2px;" onclick="_bhSetRange(${x[0]})">${x[1]}</button>`).join('')}</div>
             ${_bhBack === 0 ? `<div style="display:flex;gap:8px;margin-top:6px;"><label class="bh-num">From<input type="date" id="bh-from" value="${E(_bhFrom)}" onchange="_bhSetDates()"></label><label class="bh-num">To (blank = today)<input type="date" id="bh-to" value="${E(_bhTo)}" onchange="_bhSetDates()"></label></div>` : ''}
             <div class="bh-sub" style="margin-top:5px;">Learning from sales: ${W.label}</div>
-            <details class="pm-more-info" style="margin-top:6px;"><summary>How it works</summary><div class="note" style="padding:4px 0;">Buy = sales in the chosen range (${W.label}) × ${mult.toFixed(2)}${idx[_bhMetal] !== 1 ? ' (incl. last year’s same-period uplift)' : ''} × cover days − stock. Both tracks’ sales, tagged items only. Needs 2+ sales (1 sale is enough when nothing is left in stock). Stock = POS tags + Tag Generator tags, minus sold / issued. Days an item had nothing in stock are left out of its sales rate. A fresh batch (last 90 days) that sold out fast raises the buy ×1.25; one barely moving lowers it ×0.6. 'Few sales' = 3 or fewer. Loose items use your POS presets; their stock comes from the POS counter when it tracks one. Tap a tile for sizes &amp; designs; ✕ hides a suggestion.</div></details>
+            <details class="pm-more-info" style="margin-top:6px;"><summary>How it works</summary><div class="note" style="padding:4px 0;">Buy = sales in the chosen range (${W.label}) × ${mult.toFixed(2)}${idx[_bhMetal] !== 1 ? ' (incl. last year’s same-period uplift)' : ''} × cover days − stock. Both tracks’ sales, tagged items only. Needs 2+ sales (1 sale is enough when nothing is left in stock). Stock = POS tags + Tag Generator tags, minus sold / issued. Days an item had nothing in stock are left out of its sales rate. A fresh batch (last 90 days) that sold out fast raises the buy ×1.25; one barely moving lowers it ×0.6. 'Few sales' = 3 or fewer. Loose items use your POS presets; their stock comes from the POS counter when it tracks one. Tap a tile for sizes &amp; designs; in the popup you can set a 🔔 alarm on one view (e.g. rings: Size, chains: Design × Wt) so a nearly-empty group in that view moves the item up “Running low first”. ✕ hides a suggestion.</div></details>
             <div class="bh-h">To buy <b>${buy.length}</b></div>
             <div style="display:flex;gap:6px;margin-bottom:6px;"><button class="bh-seg${_grpSup ? '' : ' on'}" style="font-size:12px;padding:6px 2px;" onclick="_bhSetGroup('all')">All</button><button class="bh-seg${_grpSup ? ' on' : ''}" style="font-size:12px;padding:6px 2px;" onclick="_bhSetGroup('sup')">🏭 By supplier</button></div>
             ${!buy.length ? `<div class="bh-ok">✅ Nothing short at ${H} days of cover</div>` : !_grpSup ? `<div class="bh-grid">${buy.map(buyTile).join('')}</div>` : (() => {
