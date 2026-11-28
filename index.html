@@ -3272,12 +3272,14 @@ function computeCombinedAvgRate(metal){
 
     function plCompute(from, to){
         const tmap = _plTagMap();
-        const out = { rows: [], noCost: [], untagged: { rev: 0, n: 0 }, bills: 0, expenses: {}, expTotal: 0 };
+        const out = { rows: [], noCost: [], untagged: { rev: 0, n: 0 }, untagList: [], invs: {}, bills: 0, expenses: {}, expTotal: 0 };
         _pmSalesSrc().forEach(inv => {
             if (inv.draft || inv.track !== 'B') return;
             const d = new Date(inv.timestamp); if (isNaN(d)) return;
             const day = _rpDate(d); if (day < from || day > to) return;
             out.bills++;
+            const invKey = String(inv.invoiceNo || inv.billNo || '') + '|' + d.getTime();
+            out.invs[invKey] = { key: invKey, no: inv.invoiceNo || inv.billNo || '', day, ts: d.getTime(), cust: String(inv.custName || '').trim(), mob: String(inv.custMob || '').trim() };
             const t = inv.totals || {};
             // discount (before GST) is spread over the bill's lines in proportion to their value
             const f = (t.sub > 0 && t.disc > 0) ? Math.max(0, Math.min(1, (t.sub - t.disc) / t.sub)) : 1;
@@ -3291,20 +3293,20 @@ function computeCombinedAvgRate(metal){
                 // loose / preset line (weighed metal, no barcode): cost comes from a manual entry saved under its name
                 if (!bc && !item.isCustom && (item.isLoose || (item.metal && _plNum(item.nlWt) > 0))) {
                     const lk = _plLooseKey(item), prof = pmCostLoose[_plFbKey(lk)];
-                    const lrow = { tag: 'LOOSE', loose: true, lk, lname: _plLooseName(item), day, ts: d.getTime(), name, supplier: '', nw: _plNum(item.nlWt), rev, inv: inv.invoiceNo || inv.billNo || '', item };
+                    const lrow = { tag: 'LOOSE', loose: true, lk, lname: _plLooseName(item), day, ts: d.getTime(), name, supplier: '', nw: _plNum(item.nlWt), rev, inv: inv.invoiceNo || inv.billNo || '', invKey, item };
                     const lc = prof ? _plCost(item, _plManualTag(prof, item), d.getTime()) : null;
                     if (!lc) { lrow.why = prof ? 'saved cost gives nothing for this line' : 'loose item, no cost entered'; out.noCost.push(lrow); return; }
                     lrow.manual = true; lrow.cost = lc.cost; lrow.metal = lc.metal; lrow.making = lc.making; lrow.fine = lc.fine; lrow.basis = lc.basis;
                     lrow.profit = rev - lc.cost; lrow.margin = rev > 0 ? lrow.profit / rev * 100 : 0;
                     out.rows.push(lrow); return;
                 }
-                if (item.isCustom || !bc) { out.untagged.rev += rev; out.untagged.n++; return; }
+                if (item.isCustom || !bc) { out.untagged.rev += rev; out.untagged.n++; out.untagList.push({ invKey, rev, name }); return; }
                 const tag = tmap[bc], ov = pmCostTags[_plFbKey(bc)];
                 let c = _plCost(item, tag, d.getTime()), manual = false;
                 if (!c && ov) { c = _plCost(item, _plManualTag(ov, item), d.getTime()); manual = !!c; }   // Tag Generator cost wins; manual entry only fills a gap
                 const nkey = String(name).trim().toLowerCase();
                 if (!c) { const np = pmCostLoose[_plFbKey(nkey)]; if (np) { c = _plCost(item, _plManualTag(np, item), d.getTime()); manual = !!c; } }   // cost saved for the whole item name
-                const row = { tag: bc, lk: nkey, lname: name, day, ts: d.getTime(), name, supplier: (tag && tag.supplier) || '', nw: _plNum(item.nlWt), rev, inv: inv.invoiceNo || inv.billNo || '', item, manual };
+                const row = { tag: bc, lk: nkey, lname: name, day, ts: d.getTime(), name, supplier: (tag && tag.supplier) || '', nw: _plNum(item.nlWt), rev, inv: inv.invoiceNo || inv.billNo || '', invKey, item, manual };
                 if (!c) { row.why = !tag ? 'no Tag Generator record' : (tag.ts && +tag.ts > d.getTime() ? 'tag number reused' : 'no purchase cost on tag'); out.noCost.push(row); return; }
                 row.cost = c.cost; row.metal = c.metal; row.making = c.making; row.fine = c.fine; row.basis = c.basis;
                 row.profit = rev - c.cost; row.margin = rev > 0 ? row.profit / rev * 100 : 0;
@@ -3345,7 +3347,7 @@ function computeCombinedAvgRate(metal){
         const gRev = D.rows.reduce((s, r) => s + r.rev, 0), gCost = D.rows.reduce((s, r) => s + r.cost, 0), gProfit = gRev - gCost;
         const noRev = D.noCost.reduce((s, r) => s + r.rev, 0);
         const net = gProfit - D.expTotal;
-        let h = `<div style="display:flex; gap:6px; margin-bottom:10px;">${[['sum', 'Summary'], ['tags', 'Tags'], ['items', 'Items'], ['sup', 'Suppliers'], ['exp', 'Expenses']].map(([k, l]) => _plBtn(l, _plView === k, `plView('${k}')`)).join('')}</div>`;
+        let h = `<div style="display:flex; gap:6px; margin-bottom:10px;">${[['sum', 'Summary'], ['inv', 'Invoices'], ['tags', 'Tags'], ['items', 'Items'], ['sup', 'Suppliers'], ['exp', 'Expenses']].map(([k, l]) => _plBtn(l, _plView === k, `plView('${k}')`)).join('')}</div>`;
 
         if (_plView === 'sum') {
             const card = (l, v, col, sub) => `<div style="${_cardCss} margin:0;"><div style="${_hdCss} margin-bottom:6px;">${l}</div><div style="font-size:19px; font-weight:800; color:${col || 'var(--text)'};">${v}</div>${sub ? `<div style="font-size:10.5px; color:var(--text2); margin-top:2px;">${sub}</div>` : ''}</div>`;
@@ -3369,6 +3371,34 @@ function computeCombinedAvgRate(metal){
             // saved loose / preset costs
             h += `<div style="${_cardCss}"><div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;"><div style="${_hdCss} margin:0;">Loose / preset costs</div><button onclick="plCostOpenLoose('')" style="width:auto; margin:0; padding:5px 12px; font-size:12px; font-weight:700; background:white; border:1.5px solid var(--border); border-radius:8px; color:var(--text);">+ Add</button></div>` +
                 (_lpKeys.length ? _lpKeys.map(k => { const r = pmCostLoose[k] || {}; return `<div onclick="plCostOpenLoose('${_rpEnc(k)}')" style="display:flex; justify-content:space-between; gap:8px; font-size:13px; padding:8px 0; border-top:1px solid var(--border); cursor:pointer;"><span>${_rpEsc(r.name || k)}</span><span style="color:var(--text2); font-size:12px;">${_rpEsc(_plRecSummary(r))}</span></div>`; }).join('') : `<div class="note" style="font-size:12px;">Nothing saved yet. Tap a loose line under Tags, or + Add to set the cost of a POS preset. It then applies to every sale of that preset.</div>`) + `</div>`;
+        }
+
+        if (_plView === 'inv') {
+            const q = _plSearch.trim().toUpperCase(), M = {};
+            const get = k => M[k] || (M[k] = Object.assign({ lines: [], rev: 0, cRev: 0, cost: 0, profit: 0, noN: 0, noRev: 0, flatRev: 0 }, D.invs[k]));
+            D.rows.forEach(r => { const a = get(r.invKey); a.lines.push(r); a.rev += r.rev; a.cRev += r.rev; a.cost += r.cost; a.profit += r.profit; });
+            D.noCost.forEach(r => { const a = get(r.invKey); a.lines.push(Object.assign({}, r, { nocost: true })); a.rev += r.rev; a.noN++; a.noRev += r.rev; });
+            D.untagList.forEach(u => { const a = get(u.invKey); a.lines.push({ tag: '—', name: u.name, rev: u.rev, flat: true, nw: 0 }); a.rev += u.rev; a.flatRev += u.rev; });
+            let list = Object.values(M).filter(a => a.lines.length);
+            if (q) list = list.filter(a => String(a.no).toUpperCase().includes(q) || a.cust.toUpperCase().includes(q) || a.mob.includes(q));
+            const mg = a => a.cRev > 0 ? a.profit / a.cRev : 0;
+            const srt = { date: (a, b) => b.ts - a.ts, profit: (a, b) => b.profit - a.profit, loss: (a, b) => a.profit - b.profit, margin: (a, b) => mg(b) - mg(a) };
+            list.sort(srt[_plSort] || srt.date);
+            const tP = list.reduce((x, a) => x + a.profit, 0), tR = list.reduce((x, a) => x + a.rev, 0), tC = list.reduce((x, a) => x + a.cRev, 0);
+            h += `<input id="pl-q" type="search" placeholder="Search invoice no, customer or mobile" value="${_rpEsc(_plSearch)}" oninput="plSearch(this.value)" style="margin:0 0 8px;">
+                <div style="display:flex; gap:6px; margin-bottom:8px;">${[['date', 'Latest'], ['profit', 'Top profit'], ['loss', 'Lowest'], ['margin', 'Margin %']].map(([k, l]) => _plBtn(l, _plSort === k, `plSort('${k}')`)).join('')}</div>
+                <div style="${_cardCss} display:flex; justify-content:space-between; font-size:12px; color:var(--text2);"><span>${list.length} invoices · sold ${_rpFmt(tR)}</span><span>profit <b style="color:${_plCol(tP)};">${_rpFmt(tP)}</b> · ${_plPct(tP, tC)}</span></div>`;
+            const cap = list.slice(0, 200);
+            h += `<div style="${_cardCss} padding:4px 12px;">` + (cap.map(a => {
+                const k = 'i|' + a.key, open = !!_plOpen[k];
+                const part = a.noN || a.flatRev > 0 ? `<span style="color:#B26A00;"> · ${a.noN ? a.noN + ' line' + (a.noN > 1 ? 's' : '') + ' no cost' : ''}${a.noN && a.flatRev > 0 ? ', ' : ''}${a.flatRev > 0 ? 'flat-price ' + _rpFmt(a.flatRev) : ''}</span>` : '';
+                return `<div onclick="plToggle('${_rpEnc(k)}')" style="padding:9px 0; border-top:1px solid var(--border); cursor:pointer;">
+                    <div style="display:flex; justify-content:space-between; gap:8px; font-size:13px;"><span><b>${_rpEsc(a.no || 'No. –')}</b> <span style="color:var(--text2); font-size:11px;">${_rpEsc(a.cust || 'Walk-in')}</span></span><b style="color:${_plCol(a.profit)};">${a.cRev > 0 ? _rpFmt(a.profit) : '–'}</b></div>
+                    <div style="display:flex; justify-content:space-between; font-size:11px; color:var(--text2);"><span>${_rpShort(a.day)} · ${a.lines.length} line${a.lines.length > 1 ? 's' : ''}${part}</span><span>sold ${_rpFmt(a.rev)}${a.cRev > 0 ? ' · ' + (mg(a) * 100).toFixed(0) + '%' : ''}</span></div>
+                    ${open ? `<div style="margin-top:6px; padding:4px 8px; background:var(--bg,#faf7f2); border-radius:8px; font-size:11.5px;">${a.lines.map(l => `<div style="display:flex; justify-content:space-between; gap:8px; padding:5px 0; border-top:1px dashed var(--border);"><span style="min-width:0; overflow-wrap:anywhere;"><b>${_rpEsc(l.tag)}</b> ${_rpEsc(l.name)}${l.nw ? ' · ' + l.nw.toFixed(3) + ' g' : ''}</span><span style="white-space:nowrap;">${_rpFmt(l.rev)} ${l.nocost ? '<span style="color:#B26A00; font-weight:700;">no cost</span>' : l.flat ? '<span style="color:var(--text2);">flat</span>' : `<b style="color:${_plCol(l.profit)};">${_rpFmt(l.profit)}</b>`}</span></div>`).join('')}<div style="padding:5px 0; border-top:1px solid var(--border); color:var(--text2);">Profit counts only lines with a known cost (sold ${_rpFmt(a.cRev)}, cost ${_rpFmt(a.cost)}).</div></div>` : ''}
+                </div>`;
+            }).join('') || '<div class="note" style="padding:10px 0;">Nothing in this range.</div>') + '</div>';
+            if (list.length > cap.length) h += `<div class="note" style="text-align:center;">Showing the latest ${cap.length}. Narrow the dates or search to see the rest.</div>`;
         }
 
         if (_plView === 'tags') {
